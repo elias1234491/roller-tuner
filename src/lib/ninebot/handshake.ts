@@ -17,6 +17,19 @@ export interface HandshakeConfig {
 
 export const DEFAULT_CONFIG: HandshakeConfig = { sync2: 0xb5, gen: 'gen3', authOffset: 0 }
 
+/** Welche Annahme über den AUTH-Schlüssel getestet wird. */
+export type AuthKeyMode = 'derived' | 'direct' | 'swapped'
+
+/** Eine einzelne AUTH-Variante, die der Knacker durchprobiert. */
+export interface AuthAttempt {
+  counter: number
+  authOffset: number
+  sync2: number
+  keyMode: AuthKeyMode
+  /** Ziel-Board: BLE (0x04) — oder MCU (0x02) als Hypothese. */
+  target: number
+}
+
 export interface PreResult {
   paired: boolean // index != 0 -> Roller ist bereits gekoppelt
   index: number
@@ -94,14 +107,21 @@ export class HandshakeSession {
     return { success: f.index === 1, index: f.index }
   }
 
-  buildAuthFrame(counter: number, authOffset: number, sync2: number, directKey: boolean): Uint8Array {
-    const key = directKey ? this.password : deriveKey(this.password, this.auth)
-    const pt = buildRequest(sync2, BOARD.BLE, CMD.AUTH, 0x00, this.serial)
-    return encryptFrame(key, pt, { counter, auth: this.auth, authOffset })
+  /** Welcher AES-Schlüssel für AUTH: unsere Annahme (derived) oder zwei Alternativen. */
+  private authKeyFor(mode: AuthKeyMode): Uint8Array {
+    if (mode === 'direct') return this.password.slice(0, 16) // Passwort direkt als Schlüssel
+    if (mode === 'swapped') return deriveKey(this.auth, this.password) // Reihenfolge getauscht
+    return deriveKey(this.password, this.auth) // 'derived' — unsere Standardannahme
   }
 
-  readAuthResp(wire: Uint8Array, authOffset: number, directKey: boolean): { success: boolean; index: number } {
-    const key = directKey ? this.password : deriveKey(this.password, this.auth)
+  buildAuthFrame(opts: AuthAttempt): Uint8Array {
+    const key = this.authKeyFor(opts.keyMode)
+    const pt = buildRequest(opts.sync2, opts.target, CMD.AUTH, 0x00, this.serial)
+    return encryptFrame(key, pt, { counter: opts.counter, auth: this.auth, authOffset: opts.authOffset })
+  }
+
+  readAuthResp(wire: Uint8Array, authOffset: number, keyMode: AuthKeyMode): { success: boolean; index: number } {
+    const key = this.authKeyFor(keyMode)
     const { plaintext, rc } = decryptFrame(key, wire, { auth: this.auth, authOffset })
     if (rc !== 0) throw new Error('AUTH-Antwort: MAC falsch')
     const f = parseResponse(plaintext)

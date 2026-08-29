@@ -4,7 +4,8 @@ import type { BleDiag, Transport } from '../ble'
 import { toHex } from '../bytes'
 import type { Gen } from '../crypto/nbcrypto'
 import { HandshakeSession } from './handshake'
-import type { HandshakeConfig } from './handshake'
+import type { AuthKeyMode, HandshakeConfig } from './handshake'
+import { BOARD } from './frame'
 
 // Bindet einen BLE-Transport an den Handshake: sendet Rahmen, sammelt die
 // (verschlüsselten) Antwort-Rahmen wieder zusammen und fährt den 3-Schritt-Ablauf.
@@ -373,30 +374,37 @@ export async function crackHandshake(
     }
 
     // Phase D: AUTH — auf GENAU der Challenge aus Phase A (EIN PRE_COMM). Ein zweites
-    // PRE ignoriert der Roller, weil er nach dem ersten auf AUTH wartet; deshalb hier
-    // die Kombis (Schlüsselart × sync2 × Zähler × Nonce) auf einer Sitzung durchgehen.
+    // PRE ignoriert der Roller, weil er nach dem ersten auf AUTH wartet. sync2 bleibt
+    // wie beim gewinnenden PRE (0xA5). Durchprobiert werden die per Simulator-Diagnose
+    // identifizierten Verdächtigen: Schlüsselart × Ziel-Board × Zähler × Nonce —
+    // nach Wahrscheinlichkeit sortiert, damit ein Treffer früh kommt (die Challenge
+    // veraltet schnell).
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
     let auth: { success: boolean; index: number } | null = null
-    const counters = knownPassword ? [2, 3] : [3, 2] // Reconnect startet bei 2, frisch bei 3
+    const attemptMs = hooks.timeoutMs ?? 1500 // pro AUTH-Versuch (stumme laufen bis hier)
+    const keyModes: AuthKeyMode[] = ['derived', 'direct', 'swapped']
+    const targets = [BOARD.BLE, BOARD.MCU]
+    const counters = knownPassword ? [2, 3, 4] : [3, 2, 4] // Reconnect ab 2, frisch ab 3
+    const offsets = [0, 8]
 
-    outerAuth: for (const directKey of [false, true]) {
-      for (const sy of [0xb5, 0xa5]) {
-        for (const c of counters) {
-          for (const o of [0, 8]) {
-            const frame = session.buildAuthFrame(c, o, sy, directKey)
+    outerAuth: for (const keyMode of keyModes) {
+      for (const target of targets) {
+        for (const counter of counters) {
+          for (const authOffset of offsets) {
+            const frame = session.buildAuthFrame({ counter, authOffset, sync2: 0xa5, keyMode, target })
             hooks.onSent?.(frame)
             await writeAll(frame)
             let resp: Uint8Array
             try {
-              resp = await ch.next(2000)
+              resp = await ch.next(attemptMs)
             } catch {
               continue
             }
             hooks.onRecvRaw?.(resp)
-            for (const testDk of [false, true]) {
-              for (const testO of [0, 8]) {
+            for (const testMode of keyModes) {
+              for (const testO of offsets) {
                 try {
-                  auth = session.readAuthResp(resp, testO, testDk)
+                  auth = session.readAuthResp(resp, testO, testMode)
                   break outerAuth
                 } catch {
                   // passt nicht — nächste Kombi

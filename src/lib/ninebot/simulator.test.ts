@@ -48,7 +48,7 @@ describe('Handshake gegen den virtuellen ZT3', () => {
   })
 
   it('Streng-Zähler-Sim: die Kombi-Suche des Knackers trifft den richtigen Zähler', async () => {
-    const sim = new ScooterSim({ btName: NAME, paired: true, storedPassword: PW, strictCounter: true })
+    const sim = new ScooterSim({ btName: NAME, paired: true, storedPassword: PW, requireAuthCounter: 2 })
     const out = await crackHandshake(sim.asDiag(), enc(NAME), silentHooks, PW)
     expect(out.ok).toBe(true)
   })

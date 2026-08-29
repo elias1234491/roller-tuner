@@ -22,7 +22,9 @@ import type { Transport } from '../ble'
 import type { BleDiag, WriteTarget } from '../ble'
 import { FW_DATA, decryptFrame, deriveKey, encryptFrame } from '../crypto/nbcrypto'
 import type { Gen } from '../crypto/nbcrypto'
-import { BOARD, CMD, buildResponse, parseResponse } from './frame'
+import type { AuthKeyMode } from './handshake'
+import { BOARD, CMD, buildResponse, parseRequest } from './frame'
+import type { ParsedRequest } from './frame'
 import { concatBytes, toHex } from '../bytes'
 
 export interface SimConfig {
@@ -41,12 +43,15 @@ export interface SimConfig {
   paired: boolean
   /** Bei `paired`: das gespeicherte Sitzungspasswort (für den Reconnect). */
   storedPassword?: Uint8Array
-  /**
-   * Streng-Modus: verlangt bei AUTH exakt den Reconnect/Fresh-Zähler (2 bzw. 3),
-   * sonst stumm. Damit lässt sich prüfen, ob crackHandshakes Zähler-Suche
-   * wirklich auf die richtige Kombi trifft.
-   */
-  strictCounter?: boolean
+
+  // ---- Hypothesen-Schalter: was der ECHTE ZT3 bei AUTH heimlich verlangen könnte.
+  //      Passt der Client nicht, bleibt der Sim STUMM — genau wie das echte Gerät. ----
+  /** Welchen AUTH-Schlüssel der Roller erwartet (unsere Annahme: 'derived'). */
+  authKeyMode?: AuthKeyMode
+  /** Welches Ziel-Board der Roller im AUTH-Rahmen erwartet (Standard: BLE 0x04). */
+  authTarget?: number
+  /** Exakt geforderter AUTH-Zähler (null = beliebig). Fresh üblich 3, Reconnect 2. */
+  requireAuthCounter?: number | null
 }
 
 const DEFAULT_CHALLENGE = Uint8Array.from([
@@ -63,6 +68,9 @@ export function makeSimConfig(over: Partial<SimConfig> = {}): SimConfig {
     preKey2Fw: true,
     authOffset: 0,
     paired: false,
+    authKeyMode: 'derived',
+    authTarget: 0x04, // BOARD.BLE
+    requireAuthCounter: null,
     ...over,
   }
 }
@@ -112,7 +120,7 @@ export class ScooterSim {
       this.note('·', 'PRE: Prüfsumme falsch (falscher Dialekt/Schlüssel) — STUMM')
       return null
     }
-    const f = parseResponse(plaintext) // gleiche Feldlage wie eine Anfrage lesbar
+    const f = parseRequest(plaintext)
     if (f.cmd !== CMD.PRE_COMM) {
       this.note('·', `PRE-Kanal, aber cmd=0x${f.cmd.toString(16)} — STUMM`)
       return null
@@ -126,6 +134,15 @@ export class ScooterSim {
     return resp
   }
 
+  /** Der Schlüssel, mit dem der Roller (laut Hypothese) AUTH entschlüsselt. */
+  private authKey(): Uint8Array {
+    const auth = this.cfg.challenge
+    const pw = this.password!
+    if (this.cfg.authKeyMode === 'direct') return pw.slice(0, 16)
+    if (this.cfg.authKeyMode === 'swapped') return deriveKey(auth, pw)
+    return deriveKey(pw, auth)
+  }
+
   private handleSn(wire: Uint8Array, counter: number): Uint8Array | null {
     if (!this.opened) {
       this.note('·', 'SN-Rahmen ohne vorheriges PRE — STUMM')
@@ -135,20 +152,19 @@ export class ScooterSim {
     const off = this.cfg.authOffset
 
     // Erst als SET_PWD deuten (Schlüssel aus Name+Challenge), sonst als AUTH
-    // (Schlüssel aus Passwort+Challenge). Passt keiner -> STUMM.
+    // (Schlüssel je nach Hypothese). Passt keiner -> STUMM.
     const setKey = deriveKey(this.name, auth)
     const set = decryptFrame(setKey, wire, { auth, authOffset: off })
     if (set.rc === 0) {
-      const f = parseResponse(set.plaintext)
-      if (f.cmd === CMD.SET_PWD) return this.onSetPwd(f.data, counter)
+      const f = parseRequest(set.plaintext)
+      if (f.cmd === CMD.SET_PWD) return this.onSetPwd(f, counter)
     }
 
     if (this.password) {
-      const authKey = deriveKey(this.password, auth)
-      const a = decryptFrame(authKey, wire, { auth, authOffset: off })
+      const a = decryptFrame(this.authKey(), wire, { auth, authOffset: off })
       if (a.rc === 0) {
-        const f = parseResponse(a.plaintext)
-        if (f.cmd === CMD.AUTH) return this.onAuth(f.data, counter)
+        const f = parseRequest(a.plaintext)
+        if (f.cmd === CMD.AUTH) return this.onAuth(f, counter)
       }
     }
 
@@ -156,12 +172,8 @@ export class ScooterSim {
     return null
   }
 
-  private onSetPwd(payload: Uint8Array, counter: number): Uint8Array | null {
-    if (this.cfg.strictCounter && counter !== 2) {
-      this.note('·', `SET_PWD mit Zähler ${counter} (erwartet 2) — STUMM`)
-      return null
-    }
-    this.password = payload.slice(0, 16)
+  private onSetPwd(req: ParsedRequest, counter: number): Uint8Array | null {
+    this.password = req.data.slice(0, 16)
     const auth = this.cfg.challenge
     const key = deriveKey(this.name, auth)
     const pt = buildResponse(this.cfg.sync2, BOARD.BLE, CMD.SET_PWD, 0x01)
@@ -170,22 +182,22 @@ export class ScooterSim {
     return resp
   }
 
-  private onAuth(payload: Uint8Array, counter: number): Uint8Array | null {
-    const expected = this.cfg.paired ? 2 : 3
-    if (this.cfg.strictCounter && counter !== expected) {
-      this.note('·', `AUTH mit Zähler ${counter} (erwartet ${expected}) — STUMM`)
+  private onAuth(req: ParsedRequest, counter: number): Uint8Array | null {
+    if (req.target !== this.cfg.authTarget) {
+      this.note('·', `AUTH an Board 0x${req.target.toString(16)} (erwartet 0x${this.cfg.authTarget!.toString(16)}) — STUMM`)
       return null
     }
-    // Der Roller prüft, ob die mitgeschickte Serial zu seiner passt.
-    const got = payload.slice(0, 14)
-    if (toHex(got) !== toHex(this.serialBytes)) {
+    if (this.cfg.requireAuthCounter != null && counter !== this.cfg.requireAuthCounter) {
+      this.note('·', `AUTH mit Zähler ${counter} (erwartet ${this.cfg.requireAuthCounter}) — STUMM`)
+      return null
+    }
+    if (toHex(req.data.slice(0, 14)) !== toHex(this.serialBytes)) {
       this.note('·', 'AUTH: Serial passt nicht — STUMM')
       return null
     }
     const auth = this.cfg.challenge
-    const key = deriveKey(this.password!, auth)
     const pt = buildResponse(this.cfg.sync2, BOARD.BLE, CMD.AUTH, 0x01) // index 1 = frei
-    const resp = encryptFrame(key, pt, { counter, auth, authOffset: this.cfg.authOffset })
+    const resp = encryptFrame(this.authKey(), pt, { counter, auth, authOffset: this.cfg.authOffset })
     this.note('→', 'AUTH bestätigt — FREIGESCHALTET 🔓')
     return resp
   }

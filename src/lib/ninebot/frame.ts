@@ -29,6 +29,26 @@ export function buildResponse(
   return concatBytes([0x5a, sync2, data.length, source, BT_ID, cmd, index], data)
 }
 
+export interface ParsedRequest {
+  sync2: number
+  target: number
+  cmd: number
+  index: number
+  data: Uint8Array
+}
+
+/** App->Gerät zerlegen: [0x5A, sync2, LEN, 0x3E, target, cmd, index, ...data]. */
+export function parseRequest(plaintext: Uint8Array): ParsedRequest {
+  const len = plaintext[2]
+  return {
+    sync2: plaintext[1],
+    target: plaintext[4],
+    cmd: plaintext[5],
+    index: plaintext[6],
+    data: plaintext.subarray(7, 7 + len),
+  }
+}
+
 export interface ParsedFrame {
   sync2: number
   source: number
