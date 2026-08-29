@@ -372,37 +372,18 @@ export async function crackHandshake(
       hooks.onProgress({ step: 'setpwd', status: 'Sitzungsschlüssel gesetzt!', ok: true })
     }
 
-    // Phase D: AUTH. Bei bekanntem Schlüssel VOR jedem Versuch ein frisches PRE_COMM
-    // (frische Challenge, weil sie schnell veraltet). Sonst eine Session.
+    // Phase D: AUTH — auf GENAU der Challenge aus Phase A (EIN PRE_COMM). Ein zweites
+    // PRE ignoriert der Roller, weil er nach dem ersten auf AUTH wartet; deshalb hier
+    // die Kombis (Schlüsselart × sync2 × Zähler × Nonce) auf einer Sitzung durchgehen.
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
     let auth: { success: boolean; index: number } | null = null
-    const preCfg: HandshakeConfig = { sync2: 0xa5, gen: 'gen2', authOffset: 0, preKey2Fw: true }
+    const counters = knownPassword ? [2, 3] : [3, 2] // Reconnect startet bei 2, frisch bei 3
 
     outerAuth: for (const directKey of [false, true]) {
       for (const sy of [0xb5, 0xa5]) {
-        for (const c of [2, 3]) {
+        for (const c of counters) {
           for (const o of [0, 8]) {
-            let s = session
-            if (knownPassword) {
-              s = new HandshakeSession(btName, preCfg)
-              const pf = s.preCommFrame()
-              hooks.onSent?.(pf)
-              await writeAll(pf)
-              let pr: Uint8Array
-              try {
-                pr = await ch.next(2000)
-              } catch {
-                continue
-              }
-              hooks.onRecvRaw?.(pr)
-              try {
-                s.handlePreResp(pr)
-              } catch {
-                continue
-              }
-              s.usePassword(knownPassword)
-            }
-            const frame = s.buildAuthFrame(c, o, sy, directKey)
+            const frame = session.buildAuthFrame(c, o, sy, directKey)
             hooks.onSent?.(frame)
             await writeAll(frame)
             let resp: Uint8Array
@@ -415,7 +396,7 @@ export async function crackHandshake(
             for (const testDk of [false, true]) {
               for (const testO of [0, 8]) {
                 try {
-                  auth = s.readAuthResp(resp, testO, testDk)
+                  auth = session.readAuthResp(resp, testO, testDk)
                   break outerAuth
                 } catch {
                   // passt nicht — nächste Kombi

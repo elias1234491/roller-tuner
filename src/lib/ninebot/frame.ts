@@ -18,6 +18,17 @@ export function buildRequest(
   return concatBytes([0x5a, sync2, data.length, BT_ID, target, cmd, index], data)
 }
 
+/** Gerät->App: [0x5A, sync2, LEN, source, 0x3E, cmd, index, ...data] (Spiegel von buildRequest). */
+export function buildResponse(
+  sync2: number,
+  source: number,
+  cmd: number,
+  index: number,
+  data: Uint8Array = new Uint8Array(0),
+): Uint8Array {
+  return concatBytes([0x5a, sync2, data.length, source, BT_ID, cmd, index], data)
+}
+
 export interface ParsedFrame {
   sync2: number
   source: number

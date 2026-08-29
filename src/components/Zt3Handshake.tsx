@@ -3,6 +3,7 @@ import { connectBle, connectBleDiag } from '../lib/ble'
 import type { BleDiag, Transport } from '../lib/ble'
 import { crackHandshake, diagAsTransport, runHandshake, scanPreComm } from '../lib/ninebot/link'
 import { HandshakeSession } from '../lib/ninebot/handshake'
+import { ScooterSim } from '../lib/ninebot/simulator'
 import type { Gen } from '../lib/crypto/nbcrypto'
 import { fromHex, toHex } from '../lib/bytes'
 import { clearSavedKey, loadSavedKey, saveKey } from '../lib/savedKeys'
@@ -124,6 +125,36 @@ export default function Zt3Handshake() {
     }
   }
 
+  // Kompletter Handshake gegen einen VIRTUELLEN ZT3 — kein echtes Gerät nötig.
+  // Zeigt, dass unser Ablauf (PRE → SET_PWD → AUTH) end-to-end funktioniert, und
+  // läuft in jedem Browser (auch iPhone). Der Sim übernimmt die aktuellen Schalter,
+  // damit du live siehst, wie ein erfolgreicher Handshake aussieht.
+  async function simTest() {
+    setRunning(true)
+    setOutcome('')
+    setLog([])
+    try {
+      push('🧪 Virtueller ZT3 gestartet (kein echter Roller nötig) …')
+      const btName = 'NBZT300000000'
+      const sim = new ScooterSim({ btName, paired: false, sync2, gen, preKey2Fw, authOffset })
+      const res = await runHandshake(sim.asTransport(), new TextEncoder().encode(btName), { sync2, gen, authOffset, preKey2Fw }, {
+        onProgress: (p) => push((p.ok ? '✓ ' : '· ') + p.status),
+        onSent: (b) => push('→ ' + toHex(b)),
+        onRecvRaw: (b) => push('← ' + toHex(b)),
+        timeoutMs: 1500,
+      })
+      setOutcome(
+        (res.ok ? '✅ ' : '⚠️ ') +
+          res.message +
+          (res.ok ? ' — heißt: unser Handshake ist korrekt. Bleibt der ECHTE ZT3 stumm, liegt es an der Firmware, nicht an der App.' : ''),
+      )
+    } catch (e) {
+      setOutcome('❌ ' + errMsg(e) + ' — bei diesen Schaltern bliebe auch der echte Roller stumm.')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   async function deviceReport() {
     setRunning(true)
     setOutcome('')
@@ -178,6 +209,11 @@ export default function Zt3Handshake() {
           <button className={authOffset === 8 ? 'on' : ''} onClick={() => setAuthOffset(8)}>8–15</button>
         </span>
       </div>
+
+      <button className="primary" style={{ width: '100%', marginTop: 12, background: 'var(--good, #1f9d55)' }} disabled={running} onClick={simTest}>
+        {running ? 'Läuft …' : '🧪 Gegen Simulator testen (ohne Roller)'}
+      </button>
+      <p className="hint">Beweist den Ablauf end-to-end — läuft in jedem Browser, kein Gerät nötig.</p>
 
       <button className="primary" style={{ width: '100%', marginTop: 12 }} disabled={!supported || running} onClick={run}>
         {running ? 'Läuft …' : 'Verbinden & Handshake starten'}
