@@ -53,13 +53,17 @@ describe('ZT3-Diagnose: welche AUTH-Ursachen deckt unsere Suche ab?', () => {
     expect(await tryCrack({ requireAuthCounter: 4 })).toBe(true)
   })
 
+  it('Ursache E: AUTH ans VCU-Board (0x09) → jetzt abgedeckt (neu dazugenommen)', async () => {
+    expect(await tryCrack({ authTarget: 0x09 })).toBe(true)
+  })
+
   // --- ehrliche Grenzen: das kann der Sim modellieren, unsere Suche aber (noch) NICHT ---
 
   it('Blinder Fleck 1: exotischer AUTH-Zähler (5) → STUMM (bräuchte Mitschnitt)', async () => {
     expect(await tryCrack({ requireAuthCounter: 5 })).toBe(false)
   })
 
-  it('Blinder Fleck 2: AUTH an ein drittes Board (0x09 VCU) → STUMM (bräuchte Mitschnitt)', async () => {
-    expect(await tryCrack({ authTarget: 0x09 })).toBe(false)
+  it('Blinder Fleck 2: AUTH an ein noch anderes Board (0x01 Display) → STUMM (bräuchte Mitschnitt)', async () => {
+    expect(await tryCrack({ authTarget: 0x01 })).toBe(false)
   })
 })

@@ -381,11 +381,19 @@ export async function crackHandshake(
     // veraltet schnell).
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
     let auth: { success: boolean; index: number } | null = null
-    const attemptMs = hooks.timeoutMs ?? 1500 // pro AUTH-Versuch (stumme laufen bis hier)
+    const attemptMs = hooks.timeoutMs ?? 1200 // pro AUTH-Versuch (stumme laufen bis hier)
     const keyModes: AuthKeyMode[] = ['derived', 'direct', 'swapped']
-    const targets = [BOARD.BLE, BOARD.MCU]
+    const targets = [BOARD.BLE, BOARD.MCU, BOARD.VCU_GEN2] // 0x04 / 0x02 / 0x09
     const counters = knownPassword ? [2, 3, 4] : [3, 2, 4] // Reconnect ab 2, frisch ab 3
     const offsets = [0, 8]
+
+    // Mitzählen, ob der Roller in Phase D ÜBERHAUPT etwas zurückschickt — auch wenn
+    // wir es (noch) nicht entschlüsseln. Das ist der wichtigste Hinweis fürs echte Gerät:
+    // „antwortet mit Müll" heißt knackbar, „totale Stille" heißt Rahmen wird vorher verworfen.
+    let authBytes = 0
+    const authProbe = diag.subscribe((chunk) => {
+      authBytes += chunk.length
+    })
 
     outerAuth: for (const keyMode of keyModes) {
       for (const target of targets) {
@@ -415,8 +423,19 @@ export async function crackHandshake(
         }
       }
     }
+    authProbe()
     if (!auth) {
-      return { ok: false, message: 'AUTH: keine passende Antwort. Der ZT3 nutzt evtl. andere Zähler/Nonce — nochmal versuchen.' }
+      if (authBytes > 0) {
+        return {
+          ok: false,
+          message: `Wichtig: der Roller ANTWORTET bei AUTH (${authBytes} Byte), nur passt keine unserer Varianten zur Entschlüsselung. Das ist der Durchbruch-Hinweis — schick mir die ←-Zeilen aus dem Monitor, damit lässt sich die richtige Variante bestimmen.`,
+        }
+      }
+      return {
+        ok: false,
+        message:
+          'AUTH: totale Funkstille auf alle Varianten (Schlüssel/Board/Zähler/Nonce). Der ZT3 verwirft den Rahmen vor der Verarbeitung — mehr blindes Probieren hilft hier nicht, dafür braucht es den Bluetooth-Mitschnitt.',
+      }
     }
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
     hooks.onProgress({ step: 'done', status: 'Freigeschaltet — verschlüsselter Kanal steht!', ok: true })
