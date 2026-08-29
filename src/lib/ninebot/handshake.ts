@@ -94,14 +94,14 @@ export class HandshakeSession {
     return { success: f.index === 1, index: f.index }
   }
 
-  buildAuthFrame(counter: number, authOffset: number, sync2: number): Uint8Array {
-    const key = deriveKey(this.password, this.auth)
+  buildAuthFrame(counter: number, authOffset: number, sync2: number, directKey: boolean): Uint8Array {
+    const key = directKey ? this.password : deriveKey(this.password, this.auth)
     const pt = buildRequest(sync2, BOARD.BLE, CMD.AUTH, 0x00, this.serial)
     return encryptFrame(key, pt, { counter, auth: this.auth, authOffset })
   }
 
-  readAuthResp(wire: Uint8Array, authOffset: number): { success: boolean; index: number } {
-    const key = deriveKey(this.password, this.auth)
+  readAuthResp(wire: Uint8Array, authOffset: number, directKey: boolean): { success: boolean; index: number } {
+    const key = directKey ? this.password : deriveKey(this.password, this.auth)
     const { plaintext, rc } = decryptFrame(key, wire, { auth: this.auth, authOffset })
     if (rc !== 0) throw new Error('AUTH-Antwort: MAC falsch')
     const f = parseResponse(plaintext)

@@ -372,40 +372,59 @@ export async function crackHandshake(
       hooks.onProgress({ step: 'setpwd', status: 'Sitzungsschlüssel gesetzt!', ok: true })
     }
 
-    // Phase D: AUTH. Nonce-Offset (0/8) + Zähler sind für SN-Frames unbelegt → durchprobieren.
+    // Phase D: AUTH. Bei bekanntem Schlüssel VOR jedem Versuch ein frisches PRE_COMM
+    // (frische Challenge, weil sie schnell veraltet). Sonst eine Session.
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
     let auth: { success: boolean; index: number } | null = null
-    // [sync2, counter, nonce-offset] — die SN-Unbekannten durchprobieren.
-    const authTries: [number, number, number][] = [
-      [0xb5, 2, 0],
-      [0xb5, 2, 8],
-      [0xa5, 2, 0],
-      [0xa5, 2, 8],
-      [0xb5, 3, 0],
-      [0xb5, 3, 8],
-      [0xa5, 3, 0],
-      [0xa5, 3, 8],
-    ]
-    for (const [sy, c, o] of authTries) {
-      const frame = session.buildAuthFrame(c, o, sy)
-      hooks.onSent?.(frame)
-      await writeAll(frame)
-      let resp: Uint8Array
-      try {
-        resp = await ch.next(2500)
-      } catch {
-        continue
-      }
-      hooks.onRecvRaw?.(resp)
-      for (const testO of [0, 8]) {
-        try {
-          auth = session.readAuthResp(resp, testO)
-          break
-        } catch {
-          // falscher Offset — nächster
+    const preCfg: HandshakeConfig = { sync2: 0xa5, gen: 'gen2', authOffset: 0, preKey2Fw: true }
+
+    outerAuth: for (const directKey of [false, true]) {
+      for (const sy of [0xb5, 0xa5]) {
+        for (const c of [2, 3]) {
+          for (const o of [0, 8]) {
+            let s = session
+            if (knownPassword) {
+              s = new HandshakeSession(btName, preCfg)
+              const pf = s.preCommFrame()
+              hooks.onSent?.(pf)
+              await writeAll(pf)
+              let pr: Uint8Array
+              try {
+                pr = await ch.next(2000)
+              } catch {
+                continue
+              }
+              hooks.onRecvRaw?.(pr)
+              try {
+                s.handlePreResp(pr)
+              } catch {
+                continue
+              }
+              s.usePassword(knownPassword)
+            }
+            const frame = s.buildAuthFrame(c, o, sy, directKey)
+            hooks.onSent?.(frame)
+            await writeAll(frame)
+            let resp: Uint8Array
+            try {
+              resp = await ch.next(2000)
+            } catch {
+              continue
+            }
+            hooks.onRecvRaw?.(resp)
+            for (const testDk of [false, true]) {
+              for (const testO of [0, 8]) {
+                try {
+                  auth = s.readAuthResp(resp, testO, testDk)
+                  break outerAuth
+                } catch {
+                  // passt nicht — nächste Kombi
+                }
+              }
+            }
+          }
         }
       }
-      if (auth) break
     }
     if (!auth) {
       return { ok: false, message: 'AUTH: keine passende Antwort. Der ZT3 nutzt evtl. andere Zähler/Nonce — nochmal versuchen.' }
