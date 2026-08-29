@@ -272,7 +272,7 @@ export async function crackHandshake(
   const now = hooks.now ?? (() => Date.now())
   if (diag.writeChars.length === 0) return { ok: false, message: 'Keine Schreib-Kanäle am Gerät.' }
 
-  const ch = new FrameChannel(diagAsTransport(diag, diag.writeChars[0].uuid), { header: [0x5a, 0xa5], trailerLen: 10 })
+  const ch = new FrameChannel(diagAsTransport(diag, diag.writeChars[0].uuid), { header: [0x5a, -1], trailerLen: 10 })
   const rawTap = diag.subscribe((chunk) => hooks.onRecvRaw?.(chunk))
 
   const combos: { k: boolean; g: Gen }[] = [
@@ -375,14 +375,19 @@ export async function crackHandshake(
     // Phase D: AUTH. Nonce-Offset (0/8) + Zähler sind für SN-Frames unbelegt → durchprobieren.
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
     let auth: { success: boolean; index: number } | null = null
-    const authTries: [number, number][] = [
-      [2, 0],
-      [2, 8],
-      [3, 0],
-      [3, 8],
+    // [sync2, counter, nonce-offset] — die SN-Unbekannten durchprobieren.
+    const authTries: [number, number, number][] = [
+      [0xb5, 2, 0],
+      [0xb5, 2, 8],
+      [0xa5, 2, 0],
+      [0xa5, 2, 8],
+      [0xb5, 3, 0],
+      [0xb5, 3, 8],
+      [0xa5, 3, 0],
+      [0xa5, 3, 8],
     ]
-    for (const [c, o] of authTries) {
-      const frame = session.buildAuthFrame(c, o)
+    for (const [sy, c, o] of authTries) {
+      const frame = session.buildAuthFrame(c, o, sy)
       hooks.onSent?.(frame)
       await writeAll(frame)
       let resp: Uint8Array

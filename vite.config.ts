@@ -2,9 +2,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// Alles lokal im Browser — kein Server, kein Konto. Als PWA installierbar (offline).
+// Alles lokal im Browser — kein Server. Als PWA installierbar (offline).
+// BASE_PATH wird von der GitHub-Pages-Action gesetzt (Unterpfad /roller-tuner/).
 export default defineConfig({
-  base: '/',
+  base: process.env.BASE_PATH || '/',
   plugins: [
     react(),
     VitePWA({
@@ -17,7 +18,6 @@ export default defineConfig({
         theme_color: '#0b0f14',
         background_color: '#0b0f14',
         display: 'standalone',
-        start_url: '/',
         icons: [{ src: 'favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
       },
     }),

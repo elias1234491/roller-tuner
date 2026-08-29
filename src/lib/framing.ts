@@ -63,7 +63,8 @@ export class FrameReassembler {
     const h = this.fmt.header
     outer: for (let i = 0; i + h.length <= this.buf.length; i++) {
       for (let j = 0; j < h.length; j++) {
-        if (this.buf[i + j] !== h[j]) continue outer
+        // -1 im Header = Platzhalter (beliebiges Byte), z.B. sync2 A5 oder B5.
+        if (h[j] !== -1 && this.buf[i + j] !== h[j]) continue outer
       }
       return i
     }

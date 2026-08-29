@@ -94,9 +94,9 @@ export class HandshakeSession {
     return { success: f.index === 1, index: f.index }
   }
 
-  buildAuthFrame(counter: number, authOffset: number): Uint8Array {
+  buildAuthFrame(counter: number, authOffset: number, sync2: number): Uint8Array {
     const key = deriveKey(this.password, this.auth)
-    const pt = buildRequest(this.cfg.sync2, BOARD.BLE, CMD.AUTH, 0x00, this.serial)
+    const pt = buildRequest(sync2, BOARD.BLE, CMD.AUTH, 0x00, this.serial)
     return encryptFrame(key, pt, { counter, auth: this.auth, authOffset })
   }
 
