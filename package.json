@@ -1,0 +1,36 @@
+{
+  "name": "roller-tuner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lokaler E-Scooter-Tuner (Xiaomi, Ninebot, Navee) per Web Bluetooth. Alles im Browser, kein Server.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/web-bluetooth": "^0.0.21",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^25.0.1",
+    "oxlint": "^1.79.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^3.2.4"
+  }
+}
