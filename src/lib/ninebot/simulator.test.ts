@@ -84,6 +84,21 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     expect(makeBotFor(findModel('navee-v25')!)).toBeNull()
   })
 
+  it('Firmware-Downgrade am Bot: gesperrter ZT3 → flashen → entsperrt → entdrosselt', async () => {
+    // ohne Flash bleibt der ZT3-Bot gesperrt
+    const locked = makeBotFor(findModel('ninebot-zt3-pro')!)!
+    expect(locked.getFirmware()).toBe('3.6.0')
+    await crackHandshake(locked.asDiag(), enc(locked.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40, false)
+    expect(locked.getSpeedLimit()).toBe(25) // Firmware blockt
+
+    // mit Flash: alte Firmware → Sperre weg → entdrosselt
+    const flashed = makeBotFor(findModel('ninebot-zt3-pro')!)!
+    const out = await crackHandshake(flashed.asDiag(), enc(flashed.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40, true)
+    expect(out.ok).toBe(true)
+    expect(flashed.getFirmware()).toBe('2.0.0') // Downgrade griff
+    expect(flashed.getSpeedLimit()).toBe(40) // jetzt entdrosselt
+  })
+
   it('makeBotFor F3 Pro: entdrosselt 25 → 40; ZT3 Pro: bleibt 25 (Firmware-Sperre)', async () => {
     const f3 = makeBotFor(findModel('ninebot-f3-pro')!)!
     const o1 = await crackHandshake(f3.asDiag(), enc(f3.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40)

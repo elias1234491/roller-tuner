@@ -24,7 +24,7 @@ import { FW_DATA, decryptFrame, deriveKey, encryptFrame } from '../crypto/nbcryp
 import type { Gen } from '../crypto/nbcrypto'
 import type { AuthKeyMode } from './handshake'
 import type { ScooterModel } from '../types'
-import { BOARD, CMD, buildResponse, parseRequest } from './frame'
+import { BOARD, CMD, OTA, buildResponse, parseRequest } from './frame'
 import type { ParsedRequest } from './frame'
 import { concatBytes, toHex } from '../bytes'
 
@@ -133,6 +133,11 @@ export class ScooterSim {
   private opened = false // PRE_COMM gesehen -> ab jetzt SN-Modus erwartet
   private authTries = 0 // wie oft AUTH schon versucht wurde (für failFirstAuth)
   private speedLimit: number // aktuelles Limit im „Bordcomputer" (km/h)
+  private writesAccepted: boolean // nimmt der Roller Speed-Writes an? (Firmware-abhängig)
+  private firmware: string // aktuelle Firmware-Version im Bot
+  private otaTarget: number | null = null // laufende OTA: Ziel-Major-Version
+  // Ab Firmware-Major >= 3 blockt die Firmware die Speed-Writes (wie beim echten ZT3).
+  private static readonly LOCK_MAJOR = 3
 
   constructor(cfg: Partial<SimConfig> = {}) {
     this.cfg = makeSimConfig(cfg)
@@ -140,11 +145,19 @@ export class ScooterSim {
     this.serialBytes = new TextEncoder().encode(this.cfg.serial.padEnd(14, '\0')).slice(0, 14)
     this.password = this.cfg.storedPassword ? this.cfg.storedPassword.slice() : null
     this.speedLimit = this.cfg.stockLimit ?? 25
+    this.writesAccepted = this.cfg.acceptSpeedWrites ?? false
+    // Gesperrte Modelle starten auf „neuer" Firmware (>=3), offene auf „alter" (2).
+    this.firmware = this.writesAccepted ? '2.4.0' : '3.6.0'
   }
 
   /** Aktuelles Speed-Limit des Bots (km/h) — zeigt, ob das Entdrosseln gegriffen hat. */
   getSpeedLimit(): number {
     return this.speedLimit
+  }
+
+  /** Aktuelle Firmware-Version des Bots — zeigt, ob ein Downgrade/Flash gegriffen hat. */
+  getFirmware(): string {
+    return this.firmware
   }
 
   private preKey(): Uint8Array {
@@ -218,6 +231,7 @@ export class ScooterSim {
         const f = parseRequest(a.plaintext)
         if (f.cmd === CMD.AUTH) return this.onAuth(f, counter)
         if (f.cmd === CMD.WRITE) return this.onWrite(f)
+        if (f.cmd === OTA.START || f.cmd === OTA.DATA || f.cmd === OTA.FINISH) return this.onOta(f)
       }
     }
 
@@ -225,17 +239,37 @@ export class ScooterSim {
     return null
   }
 
+  /** MODELLIERTE OTA: Start (Ziel-Version) → Data → Finish. Nach Finish übernimmt der
+   *  Bot die Firmware; ist sie „alt" (< LOCK_MAJOR), entfällt die Write-Sperre. */
+  private onOta(req: ParsedRequest): Uint8Array | null {
+    if (req.cmd === OTA.START) {
+      this.otaTarget = req.data[0] ?? null
+      this.note('·', `OTA Start → Ziel-Firmware v${this.otaTarget}.x`)
+    } else if (req.cmd === OTA.DATA) {
+      this.note('·', 'OTA Datenblock empfangen')
+    } else if (req.cmd === OTA.FINISH) {
+      if (this.otaTarget != null) {
+        this.firmware = `${this.otaTarget}.0.0`
+        const unlocked = this.otaTarget < ScooterSim.LOCK_MAJOR
+        this.writesAccepted = unlocked
+        this.note('→', `OTA fertig — Firmware jetzt ${this.firmware}, Speed-Writes ${unlocked ? 'FREI' : 'weiter gesperrt'}`)
+        this.otaTarget = null
+      }
+    }
+    return null // OTA-Frames erwarten (bei uns) keine Antwort
+  }
+
   /** Register-WRITE (WRITE_NR, keine Antwort). Speed-Register werden je nach Modell
    *  übernommen (F3) oder blockiert (ZT3-Firmware-Sperre). */
   private onWrite(req: ParsedRequest): Uint8Array | null {
     const SPEED_REGS = [0x31, 0x53, 0x93] // GearTopSpeed, SpeedSafeLock, Display-Limit
     if (SPEED_REGS.includes(req.index)) {
-      if (this.cfg.acceptSpeedWrites) {
+      if (this.writesAccepted) {
         const val = (req.data[0] | (req.data[1] << 8)) & 0xffff
         this.speedLimit = val
         this.note('→', `WRITE Reg 0x${req.index.toString(16)} = ${val} km/h → übernommen (Limit jetzt ${this.speedLimit})`)
       } else {
-        this.note('·', `WRITE Reg 0x${req.index.toString(16)} — von der Firmware BLOCKIERT (wie ZT3)`)
+        this.note('·', `WRITE Reg 0x${req.index.toString(16)} — von der Firmware ${this.firmware} BLOCKIERT`)
       }
     } else {
       this.note('·', `WRITE Reg 0x${req.index.toString(16)} (kein Speed-Register) — ignoriert`)

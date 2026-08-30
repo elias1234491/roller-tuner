@@ -270,6 +270,7 @@ export async function crackHandshake(
   hooks: HandshakeHooks,
   knownPassword?: Uint8Array,
   derestrictKmh?: number,
+  flashOldFirmware?: boolean,
 ): Promise<HandshakeOutcome> {
   const now = hooks.now ?? (() => Date.now())
   if (diag.writeChars.length === 0) return { ok: false, message: 'Keine Schreib-Kanäle am Gerät.' }
@@ -452,6 +453,21 @@ export async function crackHandshake(
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
     hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
 
+    let writeCounter = authCounter + 1 // erster SN-Frame nach dem AUTH
+
+    // FIRMWARE-DOWNGRADE (nur Bot!): alte, entsperrte Firmware aufspielen, damit die
+    // Speed-Writes durchgehen. Modellierte OTA — geht bewusst NIE an ein echtes Gerät.
+    if (flashOldFirmware) {
+      hooks.onProgress({ step: 'done', status: 'Flashe alte (entsperrte) Firmware v2 … (nur Bot)' })
+      for (const f of session.buildOtaSequence(2, writeCounter, 0xa5)) {
+        hooks.onSent?.(f)
+        await writeAll(f)
+        writeCounter += 1
+        await sleep(180)
+      }
+      hooks.onProgress({ step: 'done', status: 'Firmware geflasht — Sperre sollte weg sein.', ok: true })
+    }
+
     // ENTDROSSELN: ALLE Geschwindigkeits-Grenzen hochsetzen (effektiv = min(alle)).
     // Der ZT3 kappt v.a. am MCU (0x20/GearTopSpeed 0x31) — nicht am Display (0x93).
     // WRITE ohne Antwort → jeden Wert 2× senden, Zähler laufend hochzählen.
@@ -462,7 +478,6 @@ export async function crackHandshake(
         { board: BOARD.ESC, reg: REG.SPEED_SAFE_LOCK, name: 'MCU SpeedSafeLock' },
         { board: BOARD.DISPLAY, reg: REG.LIMIT_SPEED, name: 'Display LimitSpeed' },
       ]
-      let writeCounter = authCounter + 1 // erster SN-Frame nach dem AUTH
       for (let round = 0; round < 2; round++) {
         for (const t of targets) {
           const wf = session.buildRegWrite(t.board, t.reg, derestrictKmh, writeCounter, 0xa5)

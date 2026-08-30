@@ -7,6 +7,11 @@ export const BT_ID = 0x3e
 // DISPLAY 0x01, BLE 0x04 (Handshake-Ziel), VCU 0x09, ESC/Hauptcontroller 0x20, BMS 0x22/0x23.
 export const BOARD = { DISPLAY: 0x01, MCU: 0x02, BLE: 0x04, VCU_GEN2: 0x09, ESC: 0x20 } as const
 export const CMD = { PRE_COMM: 0x5b, SET_PWD: 0x5c, AUTH: 0x5d, READ: 0x01, WRITE: 0x03 } as const
+
+// Firmware-Update (OTA) — MODELLIERT für den Bot-Test. Die echten Befehls-Bytes des
+// ZT3-OTA kennen wir noch NICHT (bräuchte einen Mitschnitt einer echten Flash-Sitzung).
+// Deshalb gehen diese Frames NIE an ein echtes Gerät, nur an den Simulator.
+export const OTA = { START: 0x60, DATA: 0x61, FINISH: 0x62 } as const
 export const SYNC2 = { GEN2: 0xa5, GEN3: 0xb5 } as const
 
 // Register (index-Byte) für die Geschwindigkeits-Grenzen. Wert je = km/h als 16-Bit

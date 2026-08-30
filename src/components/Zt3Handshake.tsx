@@ -23,6 +23,7 @@ export default function Zt3Handshake() {
   const [derestrict, setDerestrict] = useState(true)
   const [speedKmh, setSpeedKmh] = useState(40)
   const [botId, setBotId] = useState('ninebot-f3-pro')
+  const [flashFirst, setFlashFirst] = useState(false)
   const [log, setLog] = useState<string[]>([])
   const [outcome, setOutcome] = useState('')
   const [running, setRunning] = useState(false)
@@ -174,7 +175,7 @@ export default function Zt3Handshake() {
         setOutcome('⚠️ Für dieses Protokoll gibt es noch keinen Bot (nur verschlüsselte Ninebot der Gen 3).')
         return
       }
-      push(`🤖 ${model.name}-Bot: Werkslimit ${bot.getSpeedLimit()} km/h. Knacke & entdrossle auf ${speedKmh} …`)
+      push(`🤖 ${model.name}-Bot: Firmware ${bot.getFirmware()}, Limit ${bot.getSpeedLimit()} km/h.`)
       const out = await crackHandshake(
         bot.asDiag(),
         new TextEncoder().encode(bot.cfg.btName),
@@ -187,14 +188,15 @@ export default function Zt3Handshake() {
         },
         undefined,
         speedKmh,
+        flashFirst,
       )
       const after = bot.getSpeedLimit()
-      push(`🏁 Bordcomputer-Limit jetzt: ${after} km/h`)
+      push(`🏁 Firmware ${bot.getFirmware()} · Limit jetzt: ${after} km/h`)
       setOutcome(
         (out.ok ? '✅ ' : '⚠️ ') +
           (after >= speedKmh
-            ? `${model.name}-Bot ENTDROSSELT: Limit 25 → ${after} km/h. So läuft es bei einem Roller, der die Writes durchlässt.`
-            : `${model.name}-Bot: Kanal offen, aber Limit bleibt ${after} km/h — die Firmware blockt die Writes (wie beim echten ZT3).`),
+            ? `${model.name}-Bot ENTDROSSELT: Limit → ${after} km/h${flashFirst ? ` (nach Firmware-Downgrade auf ${bot.getFirmware()})` : ''}.`
+            : `${model.name}-Bot: Kanal offen, aber Limit bleibt ${after} km/h — Firmware ${bot.getFirmware()} blockt. Tipp: „Firmware-Downgrade" anhaken.`),
       )
     } catch (e) {
       setOutcome('❌ ' + errMsg(e))
@@ -286,10 +288,14 @@ export default function Zt3Handshake() {
           ))}
         </select>
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 13, cursor: 'pointer' }}>
+        <input type="checkbox" checked={flashFirst} onChange={(e) => setFlashFirst(e.target.checked)} />
+        <span>Vorher <b>Firmware-Downgrade</b> flashen <span className="r-desc">(nur Bot — löst die Sperre wie beim ZT3)</span></span>
+      </label>
       <button className="primary" style={{ width: '100%', marginTop: 6, background: 'var(--good, #1f9d55)' }} disabled={running} onClick={botDemo}>
-        {running ? 'Läuft …' : `🤖 Modell-Bot: knacken & auf ${speedKmh} entdrosseln`}
+        {running ? 'Läuft …' : `🤖 Modell-Bot: ${flashFirst ? 'flashen, ' : ''}knacken & auf ${speedKmh} entdrosseln`}
       </button>
-      <p className="hint">Virtueller Roller des gewählten Modells — zeigt live, ob das Limit greift oder die Firmware blockt.</p>
+      <p className="hint">Virtueller Roller des gewählten Modells — zeigt live, ob das Limit greift, die Firmware blockt, oder ein Downgrade die Sperre löst.</p>
 
       <button className="primary" style={{ width: '100%', marginTop: 12 }} disabled={!supported || running} onClick={run}>
         {running ? 'Läuft …' : 'Verbinden & Handshake starten'}

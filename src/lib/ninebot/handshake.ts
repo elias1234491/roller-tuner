@@ -1,7 +1,7 @@
 import { FW_DATA, deriveKey, decryptFrame, encryptFrame } from '../crypto/nbcrypto'
 import type { Gen } from '../crypto/nbcrypto'
 import { generatePassword } from '../crypto/javaRandom'
-import { BOARD, CMD, REG, buildRequest, parseResponse } from './frame'
+import { BOARD, CMD, OTA, REG, buildRequest, parseResponse } from './frame'
 
 // Dreistufiger Enc2-Handshake: PRE_COMM -> SET_PWD -> AUTH.
 // Die 3 gerätefacing Unbekannten (sync2, gen, authOffset) sind KONFIGURIERBAR,
@@ -143,6 +143,23 @@ export class HandshakeSession {
   /** Speed-Limit (Display-Register 0x93) — bleibt für Tests/Rückwärtskompatibilität. */
   buildSpeedLimitFrame(speedKmh: number, counter: number, sync2: number): Uint8Array {
     return this.buildRegWrite(BOARD.DISPLAY, REG.LIMIT_SPEED, speedKmh, counter, sync2)
+  }
+
+  /**
+   * MODELLIERTE OTA-Sequenz (Start → Image-Chunk → Finish), um im Bot eine „alte,
+   * entsperrte" Firmware (Major-Version `targetMajor`) aufzuspielen. Die Frames sind
+   * verschlüsselt (Sitzungsschlüssel) und gehen NUR an den Simulator — die echten
+   * ZT3-OTA-Bytes kennen wir noch nicht. Rückgabe: 3 Frames mit laufenden Zählern.
+   */
+  buildOtaSequence(targetMajor: number, startCounter: number, sync2: number): Uint8Array[] {
+    const key = deriveKey(this.password, this.auth)
+    const mk = (cmd: number, data: Uint8Array, counter: number): Uint8Array =>
+      encryptFrame(key, buildRequest(sync2, BOARD.ESC, cmd, 0x00, data), { counter, auth: this.auth, authOffset: 0 })
+    return [
+      mk(OTA.START, Uint8Array.from([targetMajor & 0xff]), startCounter),
+      mk(OTA.DATA, Uint8Array.from([0xde, 0xad, 0xbe, 0xef]), startCounter + 1), // Platzhalter-Image
+      mk(OTA.FINISH, new Uint8Array(0), startCounter + 2),
+    ]
   }
 
   /** Ein bereits bekanntes Passwort setzen (Reconnect direkt per AUTH, ohne SET_PWD). */
