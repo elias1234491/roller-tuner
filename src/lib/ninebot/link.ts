@@ -4,7 +4,7 @@ import type { BleDiag, Transport } from '../ble'
 import { toHex } from '../bytes'
 import type { Gen } from '../crypto/nbcrypto'
 import { HandshakeSession } from './handshake'
-import type { AuthKeyMode, HandshakeConfig } from './handshake'
+import type { HandshakeConfig } from './handshake'
 import { BOARD } from './frame'
 
 // Bindet einen BLE-Transport an den Handshake: sendet Rahmen, sammelt die
@@ -373,54 +373,52 @@ export async function crackHandshake(
       hooks.onProgress({ step: 'setpwd', status: 'Sitzungsschlüssel gesetzt!', ok: true })
     }
 
-    // Phase D: AUTH — auf GENAU der Challenge aus Phase A (EIN PRE_COMM). Ein zweites
-    // PRE ignoriert der Roller, weil er nach dem ersten auf AUTH wartet. sync2 bleibt
-    // wie beim gewinnenden PRE (0xA5). Durchprobiert werden die per Simulator-Diagnose
-    // identifizierten Verdächtigen: Schlüsselart × Ziel-Board × Zähler × Nonce —
-    // nach Wahrscheinlichkeit sortiert, damit ein Treffer früh kommt (die Challenge
-    // veraltet schnell).
+    // Phase D: AUTH — aus dem ECHTEN Segway-Mitschnitt (S26 btsnoop) byte-genau bekannt:
+    //   abgeleiteter Schlüssel, Nonce-Offset 0, Board BLE, sync2 A5, Daten = Serial,
+    //   Zähler 2 (Reconnect) bzw. 3 (nach SET_PWD).  KEIN Raten mehr.
+    // Der Mitschnitt zeigte außerdem: der ERSTE Versuch scheitert oft (Challenge veraltet)
+    // — die offizielle App macht dann einfach PRE+AUTH neu. Genau das machen wir hier:
+    // mehrfach, jedes Mal mit FRISCHER Challenge.
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
+    const attemptMs = hooks.timeoutMs ?? 1200
+    const authCounter = knownPassword ? 2 : 3
     let auth: { success: boolean; index: number } | null = null
-    const attemptMs = hooks.timeoutMs ?? 1200 // pro AUTH-Versuch (stumme laufen bis hier)
-    const keyModes: AuthKeyMode[] = ['derived', 'direct', 'swapped']
-    const targets = [BOARD.BLE, BOARD.MCU, BOARD.VCU_GEN2] // 0x04 / 0x02 / 0x09
-    const counters = knownPassword ? [2, 3, 4] : [3, 2, 4] // Reconnect ab 2, frisch ab 3
-    const offsets = [0, 8]
-
-    // Mitzählen, ob der Roller in Phase D ÜBERHAUPT etwas zurückschickt — auch wenn
-    // wir es (noch) nicht entschlüsseln. Das ist der wichtigste Hinweis fürs echte Gerät:
-    // „antwortet mit Müll" heißt knackbar, „totale Stille" heißt Rahmen wird vorher verworfen.
     let authBytes = 0
     const authProbe = diag.subscribe((chunk) => {
       authBytes += chunk.length
     })
+    const attempts = knownPassword ? 6 : 2 // Reconnect darf mehrfach retrien (frische Challenge)
 
-    outerAuth: for (const keyMode of keyModes) {
-      for (const target of targets) {
-        for (const counter of counters) {
-          for (const authOffset of offsets) {
-            const frame = session.buildAuthFrame({ counter, authOffset, sync2: 0xa5, keyMode, target })
-            hooks.onSent?.(frame)
-            await writeAll(frame)
-            let resp: Uint8Array
-            try {
-              resp = await ch.next(attemptMs)
-            } catch {
-              continue
-            }
-            hooks.onRecvRaw?.(resp)
-            for (const testMode of keyModes) {
-              for (const testO of offsets) {
-                try {
-                  auth = session.readAuthResp(resp, testO, testMode)
-                  break outerAuth
-                } catch {
-                  // passt nicht — nächste Kombi
-                }
-              }
-            }
-          }
+    for (let tryNo = 0; tryNo < attempts && !auth; tryNo++) {
+      // Ab dem 2. Versuch (nur Reconnect) eine FRISCHE Challenge holen — neues PRE.
+      if (tryNo > 0 && knownPassword) {
+        const pf = session.preCommFrame()
+        hooks.onSent?.(pf)
+        await writeAll(pf)
+        try {
+          const pr = await ch.next(attemptMs)
+          hooks.onRecvRaw?.(pr)
+          session.handlePreResp(pr)
+          session.usePassword(knownPassword)
+        } catch {
+          continue // kein frisches PRE — nächster Versuch
         }
+      }
+      const frame = session.buildAuthFrame({
+        counter: authCounter,
+        authOffset: 0,
+        sync2: 0xa5,
+        keyMode: 'derived',
+        target: BOARD.BLE,
+      })
+      hooks.onSent?.(frame)
+      await writeAll(frame)
+      try {
+        const resp = await ch.next(attemptMs)
+        hooks.onRecvRaw?.(resp)
+        auth = session.readAuthResp(resp, 0, 'derived')
+      } catch {
+        // keine (lesbare) Antwort — nächster Versuch
       }
     }
     authProbe()
@@ -428,13 +426,13 @@ export async function crackHandshake(
       if (authBytes > 0) {
         return {
           ok: false,
-          message: `Wichtig: der Roller ANTWORTET bei AUTH (${authBytes} Byte), nur passt keine unserer Varianten zur Entschlüsselung. Das ist der Durchbruch-Hinweis — schick mir die ←-Zeilen aus dem Monitor, damit lässt sich die richtige Variante bestimmen.`,
+          message: `Der Roller ANTWORTET bei AUTH (${authBytes} Byte), aber unser Schlüssel passt nicht zur Antwort. Meist heißt das: das gespeicherte Passwort ist veraltet. Roller in der Segway-App einmal entkoppeln, dann hier neu koppeln — oder schick mir die ←-Zeilen aus dem Monitor.`,
         }
       }
       return {
         ok: false,
         message:
-          'AUTH: totale Funkstille auf alle Varianten (Schlüssel/Board/Zähler/Nonce). Der ZT3 verwirft den Rahmen vor der Verarbeitung — mehr blindes Probieren hilft hier nicht, dafür braucht es den Bluetooth-Mitschnitt.',
+          'AUTH: keine Antwort nach mehreren Versuchen. Meist ist das gespeicherte Passwort veraltet (der echte Mitschnitt zeigte: die App musste neu koppeln). Roller entkoppeln + neu koppeln, dann nochmal.',
       }
     }
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }

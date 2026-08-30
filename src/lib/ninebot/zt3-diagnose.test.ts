@@ -4,66 +4,45 @@ import type { SimConfig } from './simulator'
 import { crackHandshake } from './link'
 import { fromHex } from '../bytes'
 
-// ZT3-DIAGNOSE: „austesten wie beim echten Roller — was klappt nicht?"
+// ZT3-DIAGNOSE — jetzt gegen die REALITÄT aus dem echten Segway-Mitschnitt (S26).
 //
-// Symptom am echten ZT3: PRE_COMM antwortet, danach ist bei AUTH FUNKSTILLE.
-// Unser Client ist gegen den permissiven Sim als protokollkorrekt bewiesen — also
-// muss der echte Roller im AUTH-Schritt etwas ANDERES verlangen, als wir annehmen.
-//
-// Hier baue ich für JEDE plausible Ursache einen strengen Sim, der sich genau so
-// verhält (PRE ok, AUTH stumm, wenn die Annahme nicht getroffen wird), und lasse
-// unseren echten Knacker (crackHandshake) drauf los. Ergebnis pro Hypothese:
-//   knackt  = unsere (erweiterte) Kombi-Suche deckt diese Ursache ab
-//   STUMM   = blinder Fleck → das könnte der echte ZT3 sein, dafür bräuchten wir
-//             den Bluetooth-Mitschnitt (der Sim kann die Unbekannte nicht erfinden)
-//
-// So wird aus „geht nicht" eine konkrete, abgehakte Verdächtigen-Liste.
+// Der Mitschnitt hat die AUTH-Variante byte-genau bestätigt: abgeleiteter Schlüssel,
+// Nonce-Offset 0, Board BLE, sync2 A5, Zähler 2 (Reconnect), Daten = Serial. Kein
+// Raten mehr. Er zeigte außerdem: die ERSTE Verbindung scheitert oft (Challenge
+// veraltet) — die offizielle App macht dann PRE+AUTH mit frischer Challenge NEU.
+// Genau dieses Neuversuch-Verhalten prüfen wir hier.
 
 const enc = (s: string): Uint8Array => new TextEncoder().encode(s)
 const NAME = 'NBZT300000000'
-const PW = fromHex('5874d43f46b7d7ab1dd8504b78da0870') // wie aus dem Handy-Backup
-
+const PW = fromHex('5874d43f46b7d7ab1dd8504b78da0870')
 const silent = { onProgress: () => {}, onSent: () => {}, onRecvRaw: () => {}, onWaitForButton: () => {} }
 
-// Alle Hypothesen sind „gekoppelt + Passwort bekannt" (Mathias' Fall: Reconnect per AUTH).
 async function tryCrack(over: Partial<SimConfig>): Promise<boolean> {
   const sim = new ScooterSim({ btName: NAME, paired: true, storedPassword: PW, ...over })
   const out = await crackHandshake(sim.asDiag(), enc(NAME), { ...silent, timeoutMs: 40 }, PW)
   return out.ok
 }
 
-describe('ZT3-Diagnose: welche AUTH-Ursachen deckt unsere Suche ab?', () => {
-  it('Standardannahme (derived · BLE · Zähler frei) → knackt', async () => {
+describe('ZT3-Diagnose gegen die Mitschnitt-Wahrheit', () => {
+  it('bewiesene Variante (derived · BLE · offset 0 · Zähler 2) → knackt sofort', async () => {
     expect(await tryCrack({})).toBe(true)
   })
 
-  it('Ursache A: AUTH geht ans MCU-Board (0x02) statt BLE → jetzt abgedeckt', async () => {
-    expect(await tryCrack({ authTarget: 0x02 })).toBe(true)
+  it('Reconnect mit exakt Zähler 2 (wie im Mitschnitt) → knackt', async () => {
+    expect(await tryCrack({ requireAuthCounter: 2 })).toBe(true)
   })
 
-  it('Ursache B: Schlüssel ist das Passwort DIREKT (nicht abgeleitet) → jetzt abgedeckt', async () => {
-    expect(await tryCrack({ authKeyMode: 'direct' })).toBe(true)
+  it('erste Verbindung scheitert (Challenge veraltet) → Neuversuch rettet es', async () => {
+    // failFirstAuth: 2 -> die ersten 2 AUTH-Versuche stumm, der 3. klappt (wie A->B).
+    expect(await tryCrack({ failFirstAuth: 2 })).toBe(true)
   })
 
-  it('Ursache C: Schlüsselableitung mit vertauschter Reihenfolge → jetzt abgedeckt', async () => {
-    expect(await tryCrack({ authKeyMode: 'swapped' })).toBe(true)
+  it('mehrere Fehlversuche → Neuversuch-Budget deckt es noch ab', async () => {
+    expect(await tryCrack({ failFirstAuth: 4 })).toBe(true)
   })
 
-  it('Ursache D: Roller verlangt AUTH-Zähler exakt 4 → jetzt abgedeckt', async () => {
-    expect(await tryCrack({ requireAuthCounter: 4 })).toBe(true)
-  })
-
-  it('Ursache E: AUTH ans VCU-Board (0x09) → jetzt abgedeckt (neu dazugenommen)', async () => {
-    expect(await tryCrack({ authTarget: 0x09 })).toBe(true)
-  })
-
-  // --- ehrliche Grenzen: das kann der Sim modellieren, unsere Suche aber (noch) NICHT ---
-
-  it('Blinder Fleck 1: exotischer AUTH-Zähler (5) → STUMM (bräuchte Mitschnitt)', async () => {
-    expect(await tryCrack({ requireAuthCounter: 5 })).toBe(false)
-  })
-
-  it('Blinder Fleck 2: AUTH an ein noch anderes Board (0x01 Display) → STUMM (bräuchte Mitschnitt)', async () => {
-    expect(await tryCrack({ authTarget: 0x01 })).toBe(false)
+  // --- ehrliche Grenze ---
+  it('dauerhaft stumm (veraltetes Passwort) → auch Neuversuche helfen nicht', async () => {
+    expect(await tryCrack({ failFirstAuth: 99 })).toBe(false)
   })
 })

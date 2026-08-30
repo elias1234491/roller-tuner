@@ -52,6 +52,9 @@ export interface SimConfig {
   authTarget?: number
   /** Exakt geforderter AUTH-Zähler (null = beliebig). Fresh üblich 3, Reconnect 2. */
   requireAuthCounter?: number | null
+  /** Die ersten N AUTH-Versuche stumm ignorieren (wie „Verbindung A" im Mitschnitt:
+   *  Challenge veraltet, App muss PRE+AUTH neu machen). Testet den Neuversuch. */
+  failFirstAuth?: number
 }
 
 const DEFAULT_CHALLENGE = Uint8Array.from([
@@ -87,6 +90,7 @@ export class ScooterSim {
   private readonly serialBytes: Uint8Array
   private password: Uint8Array | null
   private opened = false // PRE_COMM gesehen -> ab jetzt SN-Modus erwartet
+  private authTries = 0 // wie oft AUTH schon versucht wurde (für failFirstAuth)
 
   constructor(cfg: Partial<SimConfig> = {}) {
     this.cfg = makeSimConfig(cfg)
@@ -183,6 +187,11 @@ export class ScooterSim {
   }
 
   private onAuth(req: ParsedRequest, counter: number): Uint8Array | null {
+    this.authTries += 1
+    if (this.cfg.failFirstAuth && this.authTries <= this.cfg.failFirstAuth) {
+      this.note('·', `AUTH-Versuch ${this.authTries} absichtlich ignoriert (wie Verbindung A) — STUMM`)
+      return null
+    }
     if (req.target !== this.cfg.authTarget) {
       this.note('·', `AUTH an Board 0x${req.target.toString(16)} (erwartet 0x${this.cfg.authTarget!.toString(16)}) — STUMM`)
       return null
