@@ -5,7 +5,7 @@ import { toHex } from '../bytes'
 import type { Gen } from '../crypto/nbcrypto'
 import { HandshakeSession } from './handshake'
 import type { HandshakeConfig } from './handshake'
-import { BOARD } from './frame'
+import { BOARD, REG } from './frame'
 
 // Bindet einen BLE-Transport an den Handshake: sendet Rahmen, sammelt die
 // (verschlüsselten) Antwort-Rahmen wieder zusammen und fährt den 3-Schritt-Ablauf.
@@ -452,22 +452,31 @@ export async function crackHandshake(
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
     hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
 
-    // ENTDROSSELN: Speed-Limit (Register 0x93) über den offenen Kanal schreiben.
-    // WRITE ohne Antwort → mehrfach senden für die Sicherheit, dann fertig.
+    // ENTDROSSELN: ALLE Geschwindigkeits-Grenzen hochsetzen (effektiv = min(alle)).
+    // Der ZT3 kappt v.a. am MCU (0x20/GearTopSpeed 0x31) — nicht am Display (0x93).
+    // WRITE ohne Antwort → jeden Wert 2× senden, Zähler laufend hochzählen.
     if (derestrictKmh && derestrictKmh > 0) {
-      hooks.onProgress({ step: 'done', status: `Setze Speed-Limit auf ${derestrictKmh} km/h …` })
+      hooks.onProgress({ step: 'done', status: `Setze alle Speed-Grenzen auf ${derestrictKmh} km/h …` })
+      const targets = [
+        { board: BOARD.ESC, reg: REG.GEAR_TOP_SPEED, name: 'MCU GearTopSpeed' },
+        { board: BOARD.ESC, reg: REG.SPEED_SAFE_LOCK, name: 'MCU SpeedSafeLock' },
+        { board: BOARD.DISPLAY, reg: REG.LIMIT_SPEED, name: 'Display LimitSpeed' },
+      ]
       let writeCounter = authCounter + 1 // erster SN-Frame nach dem AUTH
-      for (let i = 0; i < 3; i++) {
-        const wf = session.buildSpeedLimitFrame(derestrictKmh, writeCounter, 0xa5)
-        hooks.onSent?.(wf)
-        await writeAll(wf)
-        writeCounter += 1
-        await sleep(250)
+      for (let round = 0; round < 2; round++) {
+        for (const t of targets) {
+          const wf = session.buildRegWrite(t.board, t.reg, derestrictKmh, writeCounter, 0xa5)
+          hooks.onSent?.(wf)
+          await writeAll(wf)
+          hooks.onProgress({ step: 'done', status: `→ ${t.name} (Board 0x${t.board.toString(16)}, Reg 0x${t.reg.toString(16)}) = ${derestrictKmh}` })
+          writeCounter += 1
+          await sleep(180)
+        }
       }
-      hooks.onProgress({ step: 'done', status: `Speed-Limit ${derestrictKmh} km/h geschrieben.`, ok: true })
+      hooks.onProgress({ step: 'done', status: `Alle Grenzen auf ${derestrictKmh} km/h geschrieben.`, ok: true })
       return {
         ok: true,
-        message: `🔓🛴 Kanal offen UND Speed-Limit auf ${derestrictKmh} km/h gesetzt! Effektiv gilt min(Motorlimit, ${derestrictKmh}) — beim ZT3 sind das per Software ~40. Zum Prüfen: kurz auf PRIVATEM Gelände testen.`,
+        message: `🔓🛴 Kanal offen UND alle Speed-Grenzen (MCU GearTopSpeed 0x31, SafeLock 0x53, Display 0x93) auf ${derestrictKmh} km/h gesetzt! Effektiv gilt min(Motorlimit, ${derestrictKmh}). Jetzt kurz auf PRIVATEM Gelände testen — geht er über 25?`,
         serialAscii: toAscii(session.getSerial()),
       }
     }

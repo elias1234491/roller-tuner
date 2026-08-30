@@ -129,15 +129,20 @@ export class HandshakeSession {
   }
 
   /**
-   * Entdrosseln: Speed-Limit (Register 0x93, Display-Board) auf `speedKmh` setzen.
-   * Verschlüsselter WRITE über den offenen Kanal (Schlüssel aus Passwort+Challenge).
-   * WRITE ohne Antwort — deshalb brauchen wir device→app-Dekodierung dafür nicht.
+   * Verschlüsselter Register-WRITE (u16 little-endian) an ein Board — über den offenen
+   * Kanal (Schlüssel aus Passwort+Challenge). Für's Entdrosseln: Speed-Grenzen setzen.
+   * WRITE ohne Antwort — device→app-Dekodierung ist dafür nicht nötig.
    */
-  buildSpeedLimitFrame(speedKmh: number, counter: number, sync2: number): Uint8Array {
+  buildRegWrite(target: number, reg: number, valueU16: number, counter: number, sync2: number): Uint8Array {
     const key = deriveKey(this.password, this.auth)
-    const data = Uint8Array.from([speedKmh & 0xff, (speedKmh >> 8) & 0xff]) // u16 little-endian
-    const pt = buildRequest(sync2, BOARD.DISPLAY, CMD.WRITE, REG.LIMIT_SPEED, data)
+    const data = Uint8Array.from([valueU16 & 0xff, (valueU16 >> 8) & 0xff])
+    const pt = buildRequest(sync2, target, CMD.WRITE, reg, data)
     return encryptFrame(key, pt, { counter, auth: this.auth, authOffset: 0 })
+  }
+
+  /** Speed-Limit (Display-Register 0x93) — bleibt für Tests/Rückwärtskompatibilität. */
+  buildSpeedLimitFrame(speedKmh: number, counter: number, sync2: number): Uint8Array {
+    return this.buildRegWrite(BOARD.DISPLAY, REG.LIMIT_SPEED, speedKmh, counter, sync2)
   }
 
   /** Ein bereits bekanntes Passwort setzen (Reconnect direkt per AUTH, ohne SET_PWD). */

@@ -3,13 +3,19 @@ import { concatBytes } from '../bytes'
 // Ninebot-Klartextrahmen (das, was VOR der Enc2-Verschlüsselung steht).
 
 export const BT_ID = 0x3e
-export const BOARD = { DISPLAY: 0x01, MCU: 0x02, BLE: 0x04, VCU_GEN2: 0x09 } as const
+// Board-Adressen (Ghidra-bestätigt, NootNooot nb_protocol.py):
+// DISPLAY 0x01, BLE 0x04 (Handshake-Ziel), VCU 0x09, ESC/Hauptcontroller 0x20, BMS 0x22/0x23.
+export const BOARD = { DISPLAY: 0x01, MCU: 0x02, BLE: 0x04, VCU_GEN2: 0x09, ESC: 0x20 } as const
 export const CMD = { PRE_COMM: 0x5b, SET_PWD: 0x5c, AUTH: 0x5d, READ: 0x01, WRITE: 0x03 } as const
 export const SYNC2 = { GEN2: 0xa5, GEN3: 0xb5 } as const
 
-// Register (index-Byte). LIMIT_SPEED sitzt auf dem Display-Board (0x01): Wert = km/h
-// als 16-Bit little-endian. Effektive Höchstgeschwindigkeit = min(Motorlimit, Wert).
-export const REG = { LIMIT_SPEED: 0x93 } as const
+// Register (index-Byte) für die Geschwindigkeits-Grenzen. Wert je = km/h als 16-Bit
+// little-endian. Effektive Höchstgeschwindigkeit = min(ALLER dieser Grenzen), deshalb
+// setzen wir beim Entdrosseln alle hoch.
+//   LIMIT_SPEED   Display-Board 0x01, nutzerseitiges Limit
+//   GEAR_TOP_SPEED ESC/MCU 0x20, Höchstwert je Fahrstufe (15–140) — Haupt-Hebel am ZT3
+//   SPEED_SAFE_LOCK ESC/MCU 0x20, MCU-interner Cap
+export const REG = { LIMIT_SPEED: 0x93, GEAR_TOP_SPEED: 0x31, SPEED_SAFE_LOCK: 0x53 } as const
 
 /** App->Gerät: [0x5A, sync2, LEN, 0x3E, target, cmd, index, ...data]  (LEN = data.length). */
 export function buildRequest(
