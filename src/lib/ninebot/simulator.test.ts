@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ScooterSim, makeF3ProD } from './simulator'
+import { ScooterSim, makeBotFor, makeF3ProD } from './simulator'
+import { MODELS, findModel } from '../models'
 import { crackHandshake, runHandshake } from './link'
 import type { HandshakeConfig } from './handshake'
 import { fromHex } from '../bytes'
@@ -73,5 +74,25 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     const out = await crackHandshake(zt3.asDiag(), enc(NAME), { ...silentHooks, timeoutMs: 40 }, PW, 40)
     expect(out.ok).toBe(true) // AUTH klappt
     expect(zt3.getSpeedLimit()).toBe(25) // aber Limit unverändert — genau wie in echt
+  })
+
+  it('makeBotFor: Bot für JEDES Enc2-Modell, null für andere Protokolle', () => {
+    for (const m of MODELS.filter((x) => x.dialect === 'ninebot-enc2')) {
+      expect(makeBotFor(m)).not.toBeNull()
+    }
+    expect(makeBotFor(findModel('xiaomi-m365')!)).toBeNull()
+    expect(makeBotFor(findModel('navee-v25')!)).toBeNull()
+  })
+
+  it('makeBotFor F3 Pro: entdrosselt 25 → 40; ZT3 Pro: bleibt 25 (Firmware-Sperre)', async () => {
+    const f3 = makeBotFor(findModel('ninebot-f3-pro')!)!
+    const o1 = await crackHandshake(f3.asDiag(), enc(f3.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40)
+    expect(o1.ok).toBe(true)
+    expect(f3.getSpeedLimit()).toBe(40)
+
+    const zt3 = makeBotFor(findModel('ninebot-zt3-pro')!)!
+    const o2 = await crackHandshake(zt3.asDiag(), enc(zt3.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40)
+    expect(o2.ok).toBe(true)
+    expect(zt3.getSpeedLimit()).toBe(25)
   })
 })

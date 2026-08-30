@@ -32,7 +32,9 @@ export const MODELS: ScooterModel[] = [
   { id: 'ninebot-gt1', brand: 'Segway·Ninebot', name: 'GT1', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 40, tuneMaxKmh: 50, notes: 'Starkes Gerät, verschlüsselt.' },
   { id: 'ninebot-gt2', brand: 'Segway·Ninebot', name: 'GT2', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 40, tuneMaxKmh: 70, notes: 'Sehr stark, verschlüsselt.' },
   { id: 'ninebot-p65', brand: 'Segway·Ninebot', name: 'P65 / P100', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 25, tuneMaxKmh: 40, notes: 'Gen 3, verschlüsselt.' },
-  { id: 'ninebot-zt3-pro', brand: 'Segway·Ninebot', name: 'ZT3 Pro', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 25, tuneMaxKmh: 40, notes: 'Der harte Brocken: Encryption2-Handshake. Ein gekoppelter ZT3 muss evtl. zuerst zurückgesetzt werden.' },
+  { id: 'ninebot-f3', brand: 'Segway·Ninebot', name: 'F3', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 25, tuneMaxKmh: 40, notes: 'Gen 3, verschlüsselt — Writes greifen (per SHU bestätigt).' },
+  { id: 'ninebot-f3-pro', brand: 'Segway·Ninebot', name: 'F3 Pro', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 25, tuneMaxKmh: 40, notes: 'Wie F3, stärker — Speed-Writes werden angenommen.' },
+  { id: 'ninebot-zt3-pro', brand: 'Segway·Ninebot', name: 'ZT3 Pro', dialect: 'ninebot-enc2', encrypted: true, stockLimitKmh: 25, tuneMaxKmh: 40, speedWritesBlocked: true, notes: 'Der harte Brocken: Handshake klappt, aber die Firmware BLOCKT die Speed-Writes (auch SHU scheitert). Braucht Hardware-Kabel.' },
 
   // ---------------- Navee ----------------
   { id: 'navee-v25', brand: 'Navee', name: 'V25', dialect: 'navee', encrypted: false, stockLimitKmh: 25, tuneMaxKmh: 30 },

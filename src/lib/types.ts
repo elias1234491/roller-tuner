@@ -26,6 +26,8 @@ export interface ScooterModel {
   tuneMaxKmh: number
   /** Kurzer, ehrlicher Hinweis zum Tuning-Stand dieses Modells. */
   notes?: string
+  /** true = Firmware blockt Speed-Writes trotz offenem Kanal (z. B. ZT3 Pro). */
+  speedWritesBlocked?: boolean
 }
 
 /** Was wir live vom Roller lesen. Optional, weil nicht jeder Roller alles liefert. */

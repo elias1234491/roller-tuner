@@ -23,6 +23,7 @@ import type { BleDiag, WriteTarget } from '../ble'
 import { FW_DATA, decryptFrame, deriveKey, encryptFrame } from '../crypto/nbcrypto'
 import type { Gen } from '../crypto/nbcrypto'
 import type { AuthKeyMode } from './handshake'
+import type { ScooterModel } from '../types'
 import { BOARD, CMD, buildResponse, parseRequest } from './frame'
 import type { ParsedRequest } from './frame'
 import { concatBytes, toHex } from '../bytes'
@@ -96,6 +97,24 @@ export function makeF3ProD(over: Partial<SimConfig> = {}): ScooterSim {
     paired: false,
     stockLimit: 25,
     acceptSpeedWrites: true,
+    ...over,
+  })
+}
+
+/**
+ * Baut aus einem Katalog-Modell einen passenden Bot. NUR für Enc2-Modelle, die
+ * unsere Handshake-Engine spricht; für xiaomi/ninebot/navee (anderes Protokoll)
+ * gibt es (noch) keinen Bot → null. ZT3 Pro: Firmware blockt Writes (acceptSpeedWrites=false).
+ */
+export function makeBotFor(model: ScooterModel, over: Partial<SimConfig> = {}): ScooterSim | null {
+  if (model.dialect !== 'ninebot-enc2') return null
+  const clean = (s: string): string => s.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+  return new ScooterSim({
+    btName: ('NB' + clean(model.id)).slice(0, 13).padEnd(13, '0'),
+    serial: (clean(model.name) + '00000000000000').slice(0, 14),
+    paired: false,
+    stockLimit: model.stockLimitKmh,
+    acceptSpeedWrites: !model.speedWritesBlocked,
     ...over,
   })
 }

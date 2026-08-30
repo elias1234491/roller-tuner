@@ -3,7 +3,8 @@ import { connectBle, connectBleDiag } from '../lib/ble'
 import type { BleDiag, Transport } from '../lib/ble'
 import { crackHandshake, diagAsTransport, runHandshake, scanPreComm } from '../lib/ninebot/link'
 import { HandshakeSession } from '../lib/ninebot/handshake'
-import { ScooterSim, makeF3ProD } from '../lib/ninebot/simulator'
+import { ScooterSim, makeBotFor } from '../lib/ninebot/simulator'
+import { MODELS, findModel } from '../lib/models'
 import type { Gen } from '../lib/crypto/nbcrypto'
 import { fromHex, toHex } from '../lib/bytes'
 import { clearSavedKey, loadSavedKey, saveKey } from '../lib/savedKeys'
@@ -21,6 +22,7 @@ export default function Zt3Handshake() {
   const [pwHex, setPwHex] = useState(loadSavedKey())
   const [derestrict, setDerestrict] = useState(true)
   const [speedKmh, setSpeedKmh] = useState(40)
+  const [botId, setBotId] = useState('ninebot-f3-pro')
   const [log, setLog] = useState<string[]>([])
   const [outcome, setOutcome] = useState('')
   const [running, setRunning] = useState(false)
@@ -158,19 +160,24 @@ export default function Zt3Handshake() {
     }
   }
 
-  // F3-Pro-D-Bot: kompletter Ablauf knacken → SET_PWD → AUTH → ENTDROSSELN gegen einen
-  // virtuellen F3, der die Speed-Writes annimmt. Zeigt, dass die App bei einem nicht
-  // firmware-gesperrten Roller wirklich das Limit hebt. Kein echtes Gerät nötig.
-  async function f3Demo() {
+  // Modell-Bot: kompletter Ablauf knacken → SET_PWD → AUTH → ENTDROSSELN gegen einen
+  // virtuellen Roller des gewählten Modells. Zeigt live, ob das Limit greift (F3, G2/G3,
+  // GT …) oder von der Firmware blockiert wird (ZT3). Kein echtes Gerät nötig.
+  async function botDemo() {
     setRunning(true)
     setOutcome('')
     setLog([])
     try {
-      const f3 = makeF3ProD()
-      push(`🤖 F3-Pro-D-Bot: Werkslimit ${f3.getSpeedLimit()} km/h. Knacke & entdrossle auf ${speedKmh} …`)
+      const model = findModel(botId)
+      const bot = model ? makeBotFor(model) : null
+      if (!model || !bot) {
+        setOutcome('⚠️ Für dieses Protokoll gibt es noch keinen Bot (nur verschlüsselte Ninebot der Gen 3).')
+        return
+      }
+      push(`🤖 ${model.name}-Bot: Werkslimit ${bot.getSpeedLimit()} km/h. Knacke & entdrossle auf ${speedKmh} …`)
       const out = await crackHandshake(
-        f3.asDiag(),
-        new TextEncoder().encode(f3.cfg.btName),
+        bot.asDiag(),
+        new TextEncoder().encode(bot.cfg.btName),
         {
           onProgress: (p) => push((p.ok ? '✓ ' : '· ') + p.status),
           onSent: (b) => push('→ ' + toHex(b)),
@@ -181,11 +188,13 @@ export default function Zt3Handshake() {
         undefined,
         speedKmh,
       )
-      push(`🏁 Bordcomputer-Limit jetzt: ${f3.getSpeedLimit()} km/h`)
+      const after = bot.getSpeedLimit()
+      push(`🏁 Bordcomputer-Limit jetzt: ${after} km/h`)
       setOutcome(
         (out.ok ? '✅ ' : '⚠️ ') +
-          `Bot-Limit ${f3.getSpeedLimit() >= speedKmh ? 'entdrosselt' : 'unverändert'} auf ${f3.getSpeedLimit()} km/h. ` +
-          'So läuft es bei einem Roller (F3 Pro), der die Writes durchlässt — im Gegensatz zum ZT3.',
+          (after >= speedKmh
+            ? `${model.name}-Bot ENTDROSSELT: Limit 25 → ${after} km/h. So läuft es bei einem Roller, der die Writes durchlässt.`
+            : `${model.name}-Bot: Kanal offen, aber Limit bleibt ${after} km/h — die Firmware blockt die Writes (wie beim echten ZT3).`),
       )
     } catch (e) {
       setOutcome('❌ ' + errMsg(e))
@@ -254,10 +263,33 @@ export default function Zt3Handshake() {
       </button>
       <p className="hint">Beweist den Ablauf end-to-end — läuft in jedem Browser, kein Gerät nötig.</p>
 
-      <button className="primary" style={{ width: '100%', marginTop: 8, background: 'var(--good, #1f9d55)' }} disabled={running} onClick={f3Demo}>
-        {running ? 'Läuft …' : `🤖 F3-Pro-D-Bot: knacken & auf ${speedKmh} entdrosseln`}
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+        <select
+          value={botId}
+          onChange={(e) => setBotId(e.target.value)}
+          style={{
+            flex: 1,
+            minWidth: 140,
+            padding: 9,
+            borderRadius: 8,
+            border: '1px solid var(--line)',
+            background: 'var(--card2)',
+            color: 'var(--text)',
+            fontSize: 14,
+          }}
+        >
+          {MODELS.filter((m) => m.dialect === 'ninebot-enc2').map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.speedWritesBlocked ? ' (Firmware-Sperre)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <button className="primary" style={{ width: '100%', marginTop: 6, background: 'var(--good, #1f9d55)' }} disabled={running} onClick={botDemo}>
+        {running ? 'Läuft …' : `🤖 Modell-Bot: knacken & auf ${speedKmh} entdrosseln`}
       </button>
-      <p className="hint">Virtueller F3, der die Writes annimmt — zeigt das Limit live von 25 → {speedKmh}.</p>
+      <p className="hint">Virtueller Roller des gewählten Modells — zeigt live, ob das Limit greift oder die Firmware blockt.</p>
 
       <button className="primary" style={{ width: '100%', marginTop: 12 }} disabled={!supported || running} onClick={run}>
         {running ? 'Läuft …' : 'Verbinden & Handshake starten'}
