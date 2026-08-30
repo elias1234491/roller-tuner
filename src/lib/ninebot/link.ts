@@ -380,23 +380,36 @@ export async function crackHandshake(
     // — die offizielle App macht dann einfach PRE+AUTH neu. Genau das machen wir hier:
     // mehrfach, jedes Mal mit FRISCHER Challenge.
     hooks.onProgress({ step: 'auth', status: 'Schalte frei (AUTH) …' })
-    const attemptMs = hooks.timeoutMs ?? 1200
+    const preWaitMs = hooks.timeoutMs ?? 2000
+    const respWaitMs = hooks.timeoutMs ?? 4000 // dem Roller GENUG Zeit lassen (Antwort ~2 s Latenz!)
     const authCounter = knownPassword ? 2 : 3
     let auth: { success: boolean; index: number } | null = null
-    let authBytes = 0
-    const authProbe = diag.subscribe((chunk) => {
-      authBytes += chunk.length
-    })
-    const attempts = knownPassword ? 6 : 2 // Reconnect darf mehrfach retrien (frische Challenge)
 
-    for (let tryNo = 0; tryNo < attempts && !auth; tryNo++) {
+    // Globaler Wächter: fängt JEDE verschlüsselte SN-Antwort (Zähler > 0) des Rollers —
+    // egal wann sie kommt. Ihre bloße Existenz beweist: der Roller hat unser AUTH
+    // akzeptiert (er verschlüsselt nur, wenn unser MAC stimmte; im echten Mitschnitt
+    // byte-genau bestätigt). Reste von PRE-Antworten (Zähler 0) zählen NICHT.
+    let sawSn = false
+    let lastSn: Uint8Array | null = null
+    const snRe = new FrameReassembler({ header: [0x5a, -1], trailerLen: 10 })
+    const snWatch = diag.subscribe((chunk) => {
+      for (const f of snRe.push(chunk)) {
+        if (((f[f.length - 2] << 8) | f[f.length - 1]) !== 0) {
+          sawSn = true
+          lastSn = f
+        }
+      }
+    })
+    const attempts = knownPassword ? 6 : 2
+
+    for (let tryNo = 0; tryNo < attempts && !sawSn; tryNo++) {
       // Ab dem 2. Versuch (nur Reconnect) eine FRISCHE Challenge holen — neues PRE.
       if (tryNo > 0 && knownPassword) {
         const pf = session.preCommFrame()
         hooks.onSent?.(pf)
         await writeAll(pf)
         try {
-          const pr = await ch.next(attemptMs)
+          const pr = await ch.next(preWaitMs)
           hooks.onRecvRaw?.(pr)
           session.handlePreResp(pr)
           session.usePassword(knownPassword)
@@ -413,42 +426,26 @@ export async function crackHandshake(
       })
       hooks.onSent?.(frame)
       await writeAll(frame)
-      // Auf eine SN-Antwort (Zähler > 0) warten. Ihre bloße EXISTENZ beweist: der Roller
-      // hat unser AUTH akzeptiert — er verschlüsselt nur, wenn unser MAC gestimmt hat
-      // (im echten Mitschnitt byte-genau bestätigt). Reste von PRE-Antworten (Zähler 0)
-      // überspringen — und danach NICHT weiter PRE senden, das würde die Sitzung killen.
-      const deadline = now() + attemptMs
-      while (now() < deadline && !auth) {
-        let resp: Uint8Array
-        try {
-          resp = await ch.next(Math.max(150, deadline - now()))
-        } catch {
-          break
-        }
-        hooks.onRecvRaw?.(resp)
-        const cnt = (resp[resp.length - 2] << 8) | resp[resp.length - 1]
-        if (cnt === 0) continue // veraltete PRE-Antwort — ignorieren
-        try {
-          auth = session.readAuthResp(resp, 0, 'derived')
-        } catch {
-          // Antwort da, aber device→app-Verschlüsselung (noch) nicht lesbar — trotzdem
-          // Beweis der Akzeptanz. index=-1 = „akzeptiert, Telemetrie noch roh".
-          auth = { success: true, index: -1 }
-        }
+      // GEDULDIG auf die Antwort warten — KEINE PREs dazwischen (die setzen die gerade
+      // etablierte Sitzung zurück; genau das hat den echten Versuch vermasselt).
+      const deadline = now() + respWaitMs
+      while (now() < deadline && !sawSn) await sleep(100)
+    }
+    snWatch()
+
+    if (sawSn && lastSn) {
+      // Antwort da → AUTH akzeptiert. Falls dekodierbar (Sim), Index lesen; sonst roh.
+      try {
+        auth = session.readAuthResp(lastSn, 0, 'derived')
+      } catch {
+        auth = { success: true, index: -1 } // device→app noch nicht lesbar, aber akzeptiert
       }
     }
-    authProbe()
     if (!auth) {
-      if (authBytes > 0) {
-        return {
-          ok: false,
-          message: `Der Roller ANTWORTET bei AUTH (${authBytes} Byte), aber unser Schlüssel passt nicht zur Antwort. Meist heißt das: das gespeicherte Passwort ist veraltet. Roller in der Segway-App einmal entkoppeln, dann hier neu koppeln — oder schick mir die ←-Zeilen aus dem Monitor.`,
-        }
-      }
       return {
         ok: false,
         message:
-          'AUTH: keine Antwort nach mehreren Versuchen. Meist ist das gespeicherte Passwort veraltet (der echte Mitschnitt zeigte: die App musste neu koppeln). Roller entkoppeln + neu koppeln, dann nochmal.',
+          'AUTH: keine verschlüsselte Antwort nach mehreren Versuchen. Meist ist das gespeicherte Passwort veraltet — Roller in der Segway-App einmal entkoppeln, dann neu koppeln, und nochmal.',
       }
     }
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
