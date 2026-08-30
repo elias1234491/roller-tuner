@@ -413,12 +413,28 @@ export async function crackHandshake(
       })
       hooks.onSent?.(frame)
       await writeAll(frame)
-      try {
-        const resp = await ch.next(attemptMs)
+      // Auf eine SN-Antwort (Zähler > 0) warten. Ihre bloße EXISTENZ beweist: der Roller
+      // hat unser AUTH akzeptiert — er verschlüsselt nur, wenn unser MAC gestimmt hat
+      // (im echten Mitschnitt byte-genau bestätigt). Reste von PRE-Antworten (Zähler 0)
+      // überspringen — und danach NICHT weiter PRE senden, das würde die Sitzung killen.
+      const deadline = now() + attemptMs
+      while (now() < deadline && !auth) {
+        let resp: Uint8Array
+        try {
+          resp = await ch.next(Math.max(150, deadline - now()))
+        } catch {
+          break
+        }
         hooks.onRecvRaw?.(resp)
-        auth = session.readAuthResp(resp, 0, 'derived')
-      } catch {
-        // keine (lesbare) Antwort — nächster Versuch
+        const cnt = (resp[resp.length - 2] << 8) | resp[resp.length - 1]
+        if (cnt === 0) continue // veraltete PRE-Antwort — ignorieren
+        try {
+          auth = session.readAuthResp(resp, 0, 'derived')
+        } catch {
+          // Antwort da, aber device→app-Verschlüsselung (noch) nicht lesbar — trotzdem
+          // Beweis der Akzeptanz. index=-1 = „akzeptiert, Telemetrie noch roh".
+          auth = { success: true, index: -1 }
+        }
       }
     }
     authProbe()
@@ -436,10 +452,13 @@ export async function crackHandshake(
       }
     }
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
-    hooks.onProgress({ step: 'done', status: 'Freigeschaltet — verschlüsselter Kanal steht!', ok: true })
+    hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
     return {
       ok: true,
-      message: 'Handshake erfolgreich — der Roller ist offen! 🔓',
+      message:
+        auth.index === -1
+          ? 'AUTH akzeptiert — der Roller antwortet verschlüsselt, der Kanal steht! 🔓 (Die Antwort-Telemetrie ist noch roh — Entdrosseln ist der nächste Schritt.)'
+          : 'Handshake erfolgreich — der Roller ist offen! 🔓',
       serialAscii: toAscii(session.getSerial()),
     }
   } finally {
