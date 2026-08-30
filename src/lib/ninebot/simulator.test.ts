@@ -85,6 +85,15 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     expect(bot.getFirmware()).toBe('3.6.0') // NICHT geflasht — Firmware unverändert
   })
 
+  it('Echte Werte auslesen am Bot: entschlüsselte Registerwerte statt Raten', async () => {
+    const bot = makeBotFor(findModel('ninebot-f3-pro')!)!
+    const out = await crackHandshake(bot.asDiag(), enc(bot.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, undefined, false, true)
+    expect(out.ok).toBe(true)
+    expect(out.readouts).toBeDefined()
+    expect(out.readouts!.some((l) => l.startsWith('Limit') && l.includes('25'))).toBe(true)
+    expect(out.readouts!.every((l) => !l.includes('nicht lesbar'))).toBe(true) // alles entschlüsselt
+  })
+
   it('makeBotFor: Bot für JEDES Enc2-Modell, null für andere Protokolle', () => {
     for (const m of MODELS.filter((x) => x.dialect === 'ninebot-enc2')) {
       expect(makeBotFor(m)).not.toBeNull()

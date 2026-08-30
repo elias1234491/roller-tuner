@@ -231,12 +231,32 @@ export class ScooterSim {
         const f = parseRequest(a.plaintext)
         if (f.cmd === CMD.AUTH) return this.onAuth(f, counter)
         if (f.cmd === CMD.WRITE) return this.onWrite(f)
+        if (f.cmd === CMD.READ) return this.onRead(f, counter)
         if (f.cmd === OTA.START || f.cmd === OTA.DATA || f.cmd === OTA.FINISH) return this.onOta(f)
       }
     }
 
     this.note('·', 'SN-Rahmen: kein Schlüssel entschlüsselt (MAC falsch) — STUMM')
     return null
+  }
+
+  /** READ: antwortet mit dem aktuellen Registerwert (u16-LE), verschlüsselt wie eine
+   *  echte Roller-Antwort (Sitzungsschlüssel, Zähler des Requests). */
+  private onRead(req: ParsedRequest, counter: number): Uint8Array | null {
+    const reg = req.index
+    let val = 0
+    if (reg === 0x93 || reg === 0x31 || reg === 0x53) val = this.speedLimit // aktuelle Limits
+    else if (reg === 0x48) val = this.speedLimit * 10 // Rated Speed, ×10-Skala
+    else if (reg === 0x09) val = 40 // Firmware-Maximum (Motorlimit)
+    const data = Uint8Array.from([val & 0xff, (val >> 8) & 0xff])
+    const pt = buildResponse(this.cfg.sync2, req.target, CMD.READ, reg, data)
+    const resp = encryptFrame(this.authKey(), pt, {
+      counter,
+      auth: this.cfg.challenge,
+      authOffset: this.cfg.authOffset,
+    })
+    this.note('→', `READ Reg 0x${reg.toString(16)} → ${val}`)
+    return resp
   }
 
   /** MODELLIERTE OTA: Start (Ziel-Version) → Data → Finish. Nach Finish übernimmt der

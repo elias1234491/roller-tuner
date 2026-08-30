@@ -145,6 +145,22 @@ export class HandshakeSession {
     return this.buildRegWrite(BOARD.DISPLAY, REG.LIMIT_SPEED, speedKmh, counter, sync2)
   }
 
+  /** Verschlüsselter Register-READ: liest `count` Bytes aus `reg` auf `target`. */
+  buildRegRead(target: number, reg: number, count: number, counter: number, sync2: number): Uint8Array {
+    const key = deriveKey(this.password, this.auth)
+    const pt = buildRequest(sync2, target, CMD.READ, reg, Uint8Array.from([count & 0xff]))
+    return encryptFrame(key, pt, { counter, auth: this.auth, authOffset: 0 })
+  }
+
+  /** Eine (verschlüsselte) Roller-ANTWORT entschlüsseln — symmetrisch, Schlüssel aus
+   *  Passwort+Challenge, Zähler aus dem Frame. rc=0 = lesbar. */
+  decodeResponse(wire: Uint8Array): { rc: number; index: number; data: Uint8Array } {
+    const key = deriveKey(this.password, this.auth)
+    const { plaintext, rc } = decryptFrame(key, wire, { auth: this.auth, authOffset: 0 })
+    const f = parseResponse(plaintext)
+    return { rc, index: f.index, data: f.data }
+  }
+
   /**
    * MODELLIERTE OTA-Sequenz (Start → Image-Chunk → Finish), um im Bot eine „alte,
    * entsperrte" Firmware (Major-Version `targetMajor`) aufzuspielen. Die Frames sind

@@ -82,6 +82,8 @@ export interface HandshakeOutcome {
   paired?: boolean
   serialAscii?: string
   channel?: string
+  /** Ausgelesene echte Roller-Werte (Register → Wert bzw. rohe Antwort). */
+  readouts?: string[]
 }
 
 function toAscii(bytes: Uint8Array): string {
@@ -271,6 +273,7 @@ export async function crackHandshake(
   knownPassword?: Uint8Array,
   derestrictKmh?: number,
   flashOldFirmware?: boolean,
+  readValues?: boolean,
 ): Promise<HandshakeOutcome> {
   const now = hooks.now ?? (() => Date.now())
   if (diag.writeChars.length === 0) return { ok: false, message: 'Keine Schreib-Kanäle am Gerät.' }
@@ -460,6 +463,62 @@ export async function crackHandshake(
     hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
 
     let writeCounter = usedAuthCounter + 1 // erster SN-Frame nach dem tatsächlichen AUTH
+
+    // ECHTE WERTE AUSLESEN (reines Lesen, null Risiko). Die Antworten sind laut Referenz
+    // symmetrisch entschlüsselbar; klappt es nicht, zeigen wir die Roh-Antwort (dann haben
+    // wir bekannten Klartext, um das Antwort-Format endgültig zu knacken).
+    if (readValues) {
+      hooks.onProgress({ step: 'done', status: 'Lese echte Roller-Werte …' })
+      const readList = [
+        { board: BOARD.DISPLAY, reg: REG.LIMIT_SPEED, name: 'Limit (aktuell)', scale: 1 },
+        { board: BOARD.DISPLAY, reg: 0x48, name: 'Rated Speed (Motor-Max)', scale: 0.1 },
+        { board: BOARD.ESC, reg: REG.GEAR_TOP_SPEED, name: 'MCU GearTopSpeed', scale: 1 },
+        { board: BOARD.ESC, reg: 0x09, name: 'MCU Firmware-Max', scale: 1 },
+      ]
+      const readouts: string[] = []
+      for (const r of readList) {
+        const rf = session.buildRegRead(r.board, r.reg, 2, writeCounter, 0xa5)
+        writeCounter += 1
+        hooks.onSent?.(rf)
+        await writeAll(rf)
+        // Auf die SN-Antwort zu GENAU diesem Register warten (Antwort per index zuordnen —
+        // sonst greift man alte Handshake-Antworten aus der Warteschlange ab).
+        let got: { rc: number; data: Uint8Array } | Uint8Array | null = null
+        const deadline = now() + respWaitMs
+        while (now() < deadline && got === null) {
+          let f: Uint8Array
+          try {
+            f = await ch.next(Math.max(150, deadline - now()))
+          } catch {
+            break
+          }
+          hooks.onRecvRaw?.(f)
+          if (((f[f.length - 2] << 8) | f[f.length - 1]) === 0) continue // PRE-Rest
+          const dec = session.decodeResponse(f)
+          if (dec.rc === 0) {
+            if (dec.index === r.reg) got = dec // Antwort zu diesem Register
+            // sonst: alte Handshake-/andere Antwort — weiter warten
+          } else {
+            got = f // nicht entschlüsselbar → Roh-Antwort mitnehmen (zum späteren Knacken)
+          }
+        }
+        if (got && !(got instanceof Uint8Array)) {
+          const raw = got.data[0] | (got.data[1] << 8)
+          const v = r.scale === 1 ? String(raw) : (raw * r.scale).toFixed(1)
+          readouts.push(`${r.name}: ${v} km/h`)
+        } else if (got instanceof Uint8Array) {
+          readouts.push(`${r.name}: Antwort da, noch nicht lesbar — roh ${toHex(got)}`)
+        } else {
+          readouts.push(`${r.name}: keine Antwort`)
+        }
+      }
+      return {
+        ok: true,
+        message: 'Echte Roller-Werte ausgelesen — schwarz auf weiß, kein Raten. 📖',
+        readouts,
+        serialAscii: toAscii(session.getSerial()),
+      }
+    }
 
     // FIRMWARE-DOWNGRADE (nur Bot!): alte, entsperrte Firmware aufspielen, damit die
     // Speed-Writes durchgehen. Modellierte OTA — geht bewusst NIE an ein echtes Gerät.

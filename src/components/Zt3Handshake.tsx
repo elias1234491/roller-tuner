@@ -161,6 +161,44 @@ export default function Zt3Handshake() {
     }
   }
 
+  // Echte Werte vom ECHTEN Roller auslesen — reines Lesen, null Risiko. Zeigt Firmware-
+  // Max, aktuelles Limit, Rated Speed. So sehen wir die echten Zahlen statt zu raten.
+  async function readReal() {
+    setRunning(true)
+    setOutcome('')
+    setLog([])
+    let diag: BleDiag | null = null
+    try {
+      push('Verbinde zum Auslesen (nur Lesen) …')
+      diag = await connectBleDiag()
+      push(`✓ ${diag.name} — ${diag.writeChars.length} Kanäle`)
+      const name = new TextEncoder().encode(diag.name)
+      const clean = pwHex.replace(/[^0-9a-fA-F]/g, '')
+      const pw = clean.length === 32 ? fromHex(clean) : undefined
+      const out = await crackHandshake(
+        diag,
+        name,
+        {
+          onProgress: (p) => push((p.ok ? '✓ ' : '· ') + p.status),
+          onWaitForButton: () => push('→ Jetzt die Ein/Aus-Taste am Roller KURZ antippen!'),
+          onSent: (b) => push('→ ' + toHex(b)),
+          onRecvRaw: (b) => push('← ' + toHex(b)),
+        },
+        pw,
+        undefined, // nicht entdrosseln
+        false, // nicht flashen
+        true, // NUR auslesen
+      )
+      if (out.readouts) out.readouts.forEach((line) => push('📖 ' + line))
+      setOutcome((out.ok ? '✅ ' : '⚠️ ') + out.message)
+    } catch (e) {
+      setOutcome('❌ ' + errMsg(e))
+    } finally {
+      diag?.disconnect()
+      setRunning(false)
+    }
+  }
+
   // Modell-Bot: kompletter Ablauf knacken → SET_PWD → AUTH → ENTDROSSELN gegen einen
   // virtuellen Roller des gewählten Modells. Zeigt live, ob das Limit greift (F3, G2/G3,
   // GT …) oder von der Firmware blockiert wird (ZT3). Kein echtes Gerät nötig.
@@ -378,6 +416,9 @@ export default function Zt3Handshake() {
 
       <button className="primary" style={{ width: '100%', marginTop: 8 }} disabled={!supported || running} onClick={sweep}>
         {running ? 'Läuft …' : derestrict ? `🔓🛴 ZT3 knacken & auf ${speedKmh} km/h entdrosseln` : '🔓 ZT3 automatisch knacken'}
+      </button>
+      <button className="ghost" style={{ width: '100%', marginTop: 8 }} disabled={!supported || running} onClick={readReal}>
+        {running ? 'Läuft …' : '📖 Echte Werte auslesen (nur Lesen, kein Risiko)'}
       </button>
       <button className="ghost" style={{ width: '100%', marginTop: 8 }} disabled={!supported || running} onClick={deviceReport}>
         Geräte-Report (GATT-Aufbau zeigen)
