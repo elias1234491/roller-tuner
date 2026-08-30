@@ -372,6 +372,7 @@ export class ScooterSim {
 
     return {
       name: this.cfg.btName,
+      simulated: true, // markiert diesen Kanal als Bot — nur so darf OTA/Flash laufen
       writeChars: [target],
       report: [`sim / ${uuid.slice(0, 8)} [wNR,notify] ✓sub`],
       subscribe: (handler) => {

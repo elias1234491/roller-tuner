@@ -402,11 +402,15 @@ export async function crackHandshake(
         }
       }
     })
-    const attempts = knownPassword ? 6 : 2
+    const attempts = 6 // beide Pfade dürfen retrien: Reconnect UND frisch (nach SET_PWD steht ein Passwort)
+    let usedAuthCounter = authCounter // welcher Zähler das erfolgreiche AUTH hatte
 
     for (let tryNo = 0; tryNo < attempts && !sawSn; tryNo++) {
-      // Ab dem 2. Versuch (nur Reconnect) eine FRISCHE Challenge holen — neues PRE.
-      if (tryNo > 0 && knownPassword) {
+      let attemptCounter = authCounter // 1. Versuch: 2 (Reconnect) bzw. 3 (frisch, nach SET_PWD)
+      // Ab dem 2. Versuch eine FRISCHE Challenge holen (neues PRE) — für BEIDE Pfade.
+      // Nach dem 1. Versuch haben wir immer ein gespeichertes Passwort (Reconnect: bekannt;
+      // frisch: per SET_PWD gesetzt), also weiter wie ein Reconnect: PRE → AUTH mit Zähler 2.
+      if (tryNo > 0) {
         const pf = session.preCommFrame()
         hooks.onSent?.(pf)
         await writeAll(pf)
@@ -414,13 +418,15 @@ export async function crackHandshake(
           const pr = await ch.next(preWaitMs)
           hooks.onRecvRaw?.(pr)
           session.handlePreResp(pr)
-          session.usePassword(knownPassword)
+          if (knownPassword) session.usePassword(knownPassword)
         } catch {
           continue // kein frisches PRE — nächster Versuch
         }
+        attemptCounter = 2
       }
+      usedAuthCounter = attemptCounter
       const frame = session.buildAuthFrame({
-        counter: authCounter,
+        counter: attemptCounter,
         authOffset: 0,
         sync2: 0xa5,
         keyMode: 'derived',
@@ -453,10 +459,19 @@ export async function crackHandshake(
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
     hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
 
-    let writeCounter = authCounter + 1 // erster SN-Frame nach dem AUTH
+    let writeCounter = usedAuthCounter + 1 // erster SN-Frame nach dem tatsächlichen AUTH
 
     // FIRMWARE-DOWNGRADE (nur Bot!): alte, entsperrte Firmware aufspielen, damit die
     // Speed-Writes durchgehen. Modellierte OTA — geht bewusst NIE an ein echtes Gerät.
+    // STRUKTURELLE SPERRE: nur gegen einen als `simulated` markierten Kanal (Bot).
+    // An echter Hardware wird hier HART abgebrochen — kein Brick durch erfundene Bytes.
+    if (flashOldFirmware && !diag.simulated) {
+      return {
+        ok: false,
+        message:
+          '🛑 Firmware-Flash abgebrochen: Das geht NUR gegen den Bot. Die OTA-Bytes sind noch modelliert (nicht das echte ZT3-Protokoll) — an ein echtes Gerät würde nie geflasht (Brick-Schutz).',
+      }
+    }
     if (flashOldFirmware) {
       hooks.onProgress({ step: 'done', status: 'Flashe alte (entsperrte) Firmware v2 … (nur Bot)' })
       for (const f of session.buildOtaSequence(2, writeCounter, 0xa5)) {

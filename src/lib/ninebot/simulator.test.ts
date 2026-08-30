@@ -76,6 +76,15 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     expect(zt3.getSpeedLimit()).toBe(25) // aber Limit unverändert — genau wie in echt
   })
 
+  it('Sicherheits-Sperre: Firmware-Flash gegen NICHT-simulierten Kanal wird hart abgebrochen', async () => {
+    const bot = makeBotFor(findModel('ninebot-zt3-pro')!)!
+    const realLike = { ...bot.asDiag(), simulated: false } // tut so, als wäre es echte Hardware
+    const out = await crackHandshake(realLike, enc(bot.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40, true)
+    expect(out.ok).toBe(false)
+    expect(out.message).toContain('Brick-Schutz')
+    expect(bot.getFirmware()).toBe('3.6.0') // NICHT geflasht — Firmware unverändert
+  })
+
   it('makeBotFor: Bot für JEDES Enc2-Modell, null für andere Protokolle', () => {
     for (const m of MODELS.filter((x) => x.dialect === 'ninebot-enc2')) {
       expect(makeBotFor(m)).not.toBeNull()

@@ -357,10 +357,10 @@ export default function Zt3Handshake() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <input
             type="number"
-            min={10}
+            min={15}
             max={70}
             value={speedKmh}
-            onChange={(e) => setSpeedKmh(Math.max(10, Math.min(70, Number(e.target.value) || 0)))}
+            onChange={(e) => setSpeedKmh(Math.max(15, Math.min(70, Number(e.target.value) || 0)))}
             style={{
               width: 90,
               padding: 9,

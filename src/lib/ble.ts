@@ -169,6 +169,9 @@ export interface WriteTarget {
 
 export interface BleDiag {
   name: string
+  /** true NUR beim Simulator-Bot. Echte Bluetooth-Geräte setzen das nie — die
+   *  Firmware-Flash-Sperre in crackHandshake verlässt sich strukturell darauf. */
+  readonly simulated?: boolean
   writeChars: WriteTarget[]
   /** Menschenlesbarer GATT-Aufbau: Dienst / Merkmal [Eigenschaften] ✓sub. */
   report: string[]
