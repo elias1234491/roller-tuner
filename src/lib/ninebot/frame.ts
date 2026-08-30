@@ -7,6 +7,10 @@ export const BOARD = { DISPLAY: 0x01, MCU: 0x02, BLE: 0x04, VCU_GEN2: 0x09 } as 
 export const CMD = { PRE_COMM: 0x5b, SET_PWD: 0x5c, AUTH: 0x5d, READ: 0x01, WRITE: 0x03 } as const
 export const SYNC2 = { GEN2: 0xa5, GEN3: 0xb5 } as const
 
+// Register (index-Byte). LIMIT_SPEED sitzt auf dem Display-Board (0x01): Wert = km/h
+// als 16-Bit little-endian. Effektive Höchstgeschwindigkeit = min(Motorlimit, Wert).
+export const REG = { LIMIT_SPEED: 0x93 } as const
+
 /** App->Gerät: [0x5A, sync2, LEN, 0x3E, target, cmd, index, ...data]  (LEN = data.length). */
 export function buildRequest(
   sync2: number,

@@ -52,4 +52,11 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     const out = await crackHandshake(sim.asDiag(), enc(NAME), silentHooks, PW)
     expect(out.ok).toBe(true)
   })
+
+  it('Entdrosseln nach AUTH: crack + Speed-Limit setzen läuft durch', async () => {
+    const sim = new ScooterSim({ btName: NAME, paired: true, storedPassword: PW })
+    const out = await crackHandshake(sim.asDiag(), enc(NAME), { ...silentHooks, timeoutMs: 40 }, PW, 40)
+    expect(out.ok).toBe(true)
+    expect(out.message).toContain('40 km/h')
+  })
 })

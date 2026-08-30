@@ -19,6 +19,8 @@ export default function Zt3Handshake() {
   const [authOffset, setAuthOffset] = useState(0)
   const [hitChannel, setHitChannel] = useState<string | null>(null)
   const [pwHex, setPwHex] = useState(loadSavedKey())
+  const [derestrict, setDerestrict] = useState(true)
+  const [speedKmh, setSpeedKmh] = useState(40)
   const [log, setLog] = useState<string[]>([])
   const [outcome, setOutcome] = useState('')
   const [running, setRunning] = useState(false)
@@ -114,6 +116,7 @@ export default function Zt3Handshake() {
           onRecvRaw: (b) => push('← ' + toHex(b)),
         },
         pw,
+        derestrict ? speedKmh : undefined,
       )
       if (out.channel) setHitChannel(out.channel)
       setOutcome((out.ok ? '✅ ' : '⚠️ ') + out.message)
@@ -261,8 +264,41 @@ export default function Zt3Handshake() {
         }}
       />
 
+      <div className="row" style={{ marginTop: 6 }}>
+        <div>
+          <div className="r-label">Beim Knacken entdrosseln</div>
+          <div className="r-desc">setzt Speed-Limit (Register 0x93). ~40 = Software-Max am ZT3.</div>
+        </div>
+        <span className="seg">
+          <button className={derestrict ? 'on' : ''} onClick={() => setDerestrict(true)}>An</button>
+          <button className={!derestrict ? 'on' : ''} onClick={() => setDerestrict(false)}>Aus</button>
+        </span>
+      </div>
+      {derestrict && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <input
+            type="number"
+            min={10}
+            max={70}
+            value={speedKmh}
+            onChange={(e) => setSpeedKmh(Math.max(10, Math.min(70, Number(e.target.value) || 0)))}
+            style={{
+              width: 90,
+              padding: 9,
+              borderRadius: 8,
+              border: '1px solid var(--line)',
+              background: 'var(--card2)',
+              color: 'var(--text)',
+              fontFamily: 'ui-monospace, monospace',
+              fontSize: 15,
+            }}
+          />
+          <span className="r-desc">km/h — nur auf privatem Gelände!</span>
+        </div>
+      )}
+
       <button className="primary" style={{ width: '100%', marginTop: 8 }} disabled={!supported || running} onClick={sweep}>
-        {running ? 'Läuft …' : '🔓 ZT3 automatisch knacken'}
+        {running ? 'Läuft …' : derestrict ? `🔓🛴 ZT3 knacken & auf ${speedKmh} km/h entdrosseln` : '🔓 ZT3 automatisch knacken'}
       </button>
       <button className="ghost" style={{ width: '100%', marginTop: 8 }} disabled={!supported || running} onClick={deviceReport}>
         Geräte-Report (GATT-Aufbau zeigen)

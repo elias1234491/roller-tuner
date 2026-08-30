@@ -60,4 +60,16 @@ describe('HandshakeSession — kompletter Ablauf', () => {
     expect(r.counter).toBe(3)
     expect(hex(r.plaintext)).toBe('5ab50e3e045d00' + hex(SERIAL))
   })
+
+  it('Entdrosseln: schreibt Register 0x93 (Display-Board) mit km/h als u16-LE', () => {
+    const s = new HandshakeSession(NAME, CFG)
+    s.preCommFrame()
+    s.handlePreResp(fakePreResponse())
+    s.usePassword(PW)
+    const wire = s.buildSpeedLimitFrame(40, 3, 0xb5) // 40 km/h = 0x28,0x00
+    const r = decryptFrame(deriveKey(PW, AUTH), wire, { auth: AUTH })
+    expect(r.rc).toBe(0)
+    // [5a, b5, LEN=02, 3e, target=01(Display), cmd=03(WRITE), reg=93, 28, 00]
+    expect(hex(r.plaintext)).toBe('5ab5023e0103932800')
+  })
 })

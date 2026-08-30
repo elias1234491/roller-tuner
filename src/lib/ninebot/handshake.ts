@@ -1,7 +1,7 @@
 import { FW_DATA, deriveKey, decryptFrame, encryptFrame } from '../crypto/nbcrypto'
 import type { Gen } from '../crypto/nbcrypto'
 import { generatePassword } from '../crypto/javaRandom'
-import { BOARD, CMD, buildRequest, parseResponse } from './frame'
+import { BOARD, CMD, REG, buildRequest, parseResponse } from './frame'
 
 // Dreistufiger Enc2-Handshake: PRE_COMM -> SET_PWD -> AUTH.
 // Die 3 gerätefacing Unbekannten (sync2, gen, authOffset) sind KONFIGURIERBAR,
@@ -126,6 +126,18 @@ export class HandshakeSession {
     if (rc !== 0) throw new Error('AUTH-Antwort: MAC falsch')
     const f = parseResponse(plaintext)
     return { success: f.index === 1, index: f.index }
+  }
+
+  /**
+   * Entdrosseln: Speed-Limit (Register 0x93, Display-Board) auf `speedKmh` setzen.
+   * Verschlüsselter WRITE über den offenen Kanal (Schlüssel aus Passwort+Challenge).
+   * WRITE ohne Antwort — deshalb brauchen wir device→app-Dekodierung dafür nicht.
+   */
+  buildSpeedLimitFrame(speedKmh: number, counter: number, sync2: number): Uint8Array {
+    const key = deriveKey(this.password, this.auth)
+    const data = Uint8Array.from([speedKmh & 0xff, (speedKmh >> 8) & 0xff]) // u16 little-endian
+    const pt = buildRequest(sync2, BOARD.DISPLAY, CMD.WRITE, REG.LIMIT_SPEED, data)
+    return encryptFrame(key, pt, { counter, auth: this.auth, authOffset: 0 })
   }
 
   /** Ein bereits bekanntes Passwort setzen (Reconnect direkt per AUTH, ohne SET_PWD). */

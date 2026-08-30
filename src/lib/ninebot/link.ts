@@ -269,6 +269,7 @@ export async function crackHandshake(
   btName: Uint8Array,
   hooks: HandshakeHooks,
   knownPassword?: Uint8Array,
+  derestrictKmh?: number,
 ): Promise<HandshakeOutcome> {
   const now = hooks.now ?? (() => Date.now())
   if (diag.writeChars.length === 0) return { ok: false, message: 'Keine Schreib-Kanäle am Gerät.' }
@@ -450,11 +451,32 @@ export async function crackHandshake(
     }
     if (!auth.success) return { ok: false, message: `Freischaltung abgelehnt (AUTH index=${auth.index}).` }
     hooks.onProgress({ step: 'done', status: 'AUTH akzeptiert — verschlüsselter Kanal steht!', ok: true })
+
+    // ENTDROSSELN: Speed-Limit (Register 0x93) über den offenen Kanal schreiben.
+    // WRITE ohne Antwort → mehrfach senden für die Sicherheit, dann fertig.
+    if (derestrictKmh && derestrictKmh > 0) {
+      hooks.onProgress({ step: 'done', status: `Setze Speed-Limit auf ${derestrictKmh} km/h …` })
+      let writeCounter = authCounter + 1 // erster SN-Frame nach dem AUTH
+      for (let i = 0; i < 3; i++) {
+        const wf = session.buildSpeedLimitFrame(derestrictKmh, writeCounter, 0xa5)
+        hooks.onSent?.(wf)
+        await writeAll(wf)
+        writeCounter += 1
+        await sleep(250)
+      }
+      hooks.onProgress({ step: 'done', status: `Speed-Limit ${derestrictKmh} km/h geschrieben.`, ok: true })
+      return {
+        ok: true,
+        message: `🔓🛴 Kanal offen UND Speed-Limit auf ${derestrictKmh} km/h gesetzt! Effektiv gilt min(Motorlimit, ${derestrictKmh}) — beim ZT3 sind das per Software ~40. Zum Prüfen: kurz auf PRIVATEM Gelände testen.`,
+        serialAscii: toAscii(session.getSerial()),
+      }
+    }
+
     return {
       ok: true,
       message:
         auth.index === -1
-          ? 'AUTH akzeptiert — der Roller antwortet verschlüsselt, der Kanal steht! 🔓 (Die Antwort-Telemetrie ist noch roh — Entdrosseln ist der nächste Schritt.)'
+          ? 'AUTH akzeptiert — der Roller antwortet verschlüsselt, der Kanal steht! 🔓 (Antwort-Telemetrie noch roh; Speed setzen geht trotzdem — Wert oben eintragen.)'
           : 'Handshake erfolgreich — der Roller ist offen! 🔓',
       serialAscii: toAscii(session.getSerial()),
     }
