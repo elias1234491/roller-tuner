@@ -3,7 +3,7 @@ import { connectBle, connectBleDiag } from '../lib/ble'
 import type { BleDiag, Transport } from '../lib/ble'
 import { crackHandshake, diagAsTransport, runHandshake, scanPreComm } from '../lib/ninebot/link'
 import { HandshakeSession } from '../lib/ninebot/handshake'
-import { ScooterSim } from '../lib/ninebot/simulator'
+import { ScooterSim, makeF3ProD } from '../lib/ninebot/simulator'
 import type { Gen } from '../lib/crypto/nbcrypto'
 import { fromHex, toHex } from '../lib/bytes'
 import { clearSavedKey, loadSavedKey, saveKey } from '../lib/savedKeys'
@@ -158,6 +158,42 @@ export default function Zt3Handshake() {
     }
   }
 
+  // F3-Pro-D-Bot: kompletter Ablauf knacken → SET_PWD → AUTH → ENTDROSSELN gegen einen
+  // virtuellen F3, der die Speed-Writes annimmt. Zeigt, dass die App bei einem nicht
+  // firmware-gesperrten Roller wirklich das Limit hebt. Kein echtes Gerät nötig.
+  async function f3Demo() {
+    setRunning(true)
+    setOutcome('')
+    setLog([])
+    try {
+      const f3 = makeF3ProD()
+      push(`🤖 F3-Pro-D-Bot: Werkslimit ${f3.getSpeedLimit()} km/h. Knacke & entdrossle auf ${speedKmh} …`)
+      const out = await crackHandshake(
+        f3.asDiag(),
+        new TextEncoder().encode(f3.cfg.btName),
+        {
+          onProgress: (p) => push((p.ok ? '✓ ' : '· ') + p.status),
+          onSent: (b) => push('→ ' + toHex(b)),
+          onRecvRaw: (b) => push('← ' + toHex(b)),
+          onWaitForButton: () => {},
+          timeoutMs: 400,
+        },
+        undefined,
+        speedKmh,
+      )
+      push(`🏁 Bordcomputer-Limit jetzt: ${f3.getSpeedLimit()} km/h`)
+      setOutcome(
+        (out.ok ? '✅ ' : '⚠️ ') +
+          `Bot-Limit ${f3.getSpeedLimit() >= speedKmh ? 'entdrosselt' : 'unverändert'} auf ${f3.getSpeedLimit()} km/h. ` +
+          'So läuft es bei einem Roller (F3 Pro), der die Writes durchlässt — im Gegensatz zum ZT3.',
+      )
+    } catch (e) {
+      setOutcome('❌ ' + errMsg(e))
+    } finally {
+      setRunning(false)
+    }
+  }
+
   async function deviceReport() {
     setRunning(true)
     setOutcome('')
@@ -217,6 +253,11 @@ export default function Zt3Handshake() {
         {running ? 'Läuft …' : '🧪 Gegen Simulator testen (ohne Roller)'}
       </button>
       <p className="hint">Beweist den Ablauf end-to-end — läuft in jedem Browser, kein Gerät nötig.</p>
+
+      <button className="primary" style={{ width: '100%', marginTop: 8, background: 'var(--good, #1f9d55)' }} disabled={running} onClick={f3Demo}>
+        {running ? 'Läuft …' : `🤖 F3-Pro-D-Bot: knacken & auf ${speedKmh} entdrosseln`}
+      </button>
+      <p className="hint">Virtueller F3, der die Writes annimmt — zeigt das Limit live von 25 → {speedKmh}.</p>
 
       <button className="primary" style={{ width: '100%', marginTop: 12 }} disabled={!supported || running} onClick={run}>
         {running ? 'Läuft …' : 'Verbinden & Handshake starten'}

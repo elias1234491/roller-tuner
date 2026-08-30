@@ -55,6 +55,12 @@ export interface SimConfig {
   /** Die ersten N AUTH-Versuche stumm ignorieren (wie „Verbindung A" im Mitschnitt:
    *  Challenge veraltet, App muss PRE+AUTH neu machen). Testet den Neuversuch. */
   failFirstAuth?: number
+
+  // ---- Modell-Verhalten beim Entdrosseln ----
+  /** Werksseitiges Speed-Limit in km/h (Startwert des Bordcomputers). */
+  stockLimit?: number
+  /** Nimmt der Roller Speed-Register-Writes AN? F3 Pro = ja, ZT3 Pro = nein (Firmware-Sperre). */
+  acceptSpeedWrites?: boolean
 }
 
 const DEFAULT_CHALLENGE = Uint8Array.from([
@@ -74,8 +80,24 @@ export function makeSimConfig(over: Partial<SimConfig> = {}): SimConfig {
     authKeyMode: 'derived',
     authTarget: 0x04, // BOARD.BLE
     requireAuthCounter: null,
+    stockLimit: 25,
+    acceptSpeedWrites: false, // Standard = hart wie der ZT3; F3-Bot setzt es auf true
     ...over,
   }
+}
+
+/** Ein „1:1-Bot" des Ninebot F3 Pro-D: frisch (index 0), spricht Enc2, und NIMMT
+ *  Speed-Writes AN — anders als der firmware-gesperrte ZT3. Damit lässt sich der
+ *  komplette Ablauf knacken → SET_PWD → AUTH → ENTDROSSELN end-to-end zeigen. */
+export function makeF3ProD(over: Partial<SimConfig> = {}): ScooterSim {
+  return new ScooterSim({
+    btName: 'NBF3PROD00000',
+    serial: 'F3PD1234567890',
+    paired: false,
+    stockLimit: 25,
+    acceptSpeedWrites: true,
+    ...over,
+  })
 }
 
 interface SimEvent {
@@ -91,12 +113,19 @@ export class ScooterSim {
   private password: Uint8Array | null
   private opened = false // PRE_COMM gesehen -> ab jetzt SN-Modus erwartet
   private authTries = 0 // wie oft AUTH schon versucht wurde (für failFirstAuth)
+  private speedLimit: number // aktuelles Limit im „Bordcomputer" (km/h)
 
   constructor(cfg: Partial<SimConfig> = {}) {
     this.cfg = makeSimConfig(cfg)
     this.name = new TextEncoder().encode(this.cfg.btName)
     this.serialBytes = new TextEncoder().encode(this.cfg.serial.padEnd(14, '\0')).slice(0, 14)
     this.password = this.cfg.storedPassword ? this.cfg.storedPassword.slice() : null
+    this.speedLimit = this.cfg.stockLimit ?? 25
+  }
+
+  /** Aktuelles Speed-Limit des Bots (km/h) — zeigt, ob das Entdrosseln gegriffen hat. */
+  getSpeedLimit(): number {
+    return this.speedLimit
   }
 
   private preKey(): Uint8Array {
@@ -169,11 +198,30 @@ export class ScooterSim {
       if (a.rc === 0) {
         const f = parseRequest(a.plaintext)
         if (f.cmd === CMD.AUTH) return this.onAuth(f, counter)
+        if (f.cmd === CMD.WRITE) return this.onWrite(f)
       }
     }
 
     this.note('·', 'SN-Rahmen: kein Schlüssel entschlüsselt (MAC falsch) — STUMM')
     return null
+  }
+
+  /** Register-WRITE (WRITE_NR, keine Antwort). Speed-Register werden je nach Modell
+   *  übernommen (F3) oder blockiert (ZT3-Firmware-Sperre). */
+  private onWrite(req: ParsedRequest): Uint8Array | null {
+    const SPEED_REGS = [0x31, 0x53, 0x93] // GearTopSpeed, SpeedSafeLock, Display-Limit
+    if (SPEED_REGS.includes(req.index)) {
+      if (this.cfg.acceptSpeedWrites) {
+        const val = (req.data[0] | (req.data[1] << 8)) & 0xffff
+        this.speedLimit = val
+        this.note('→', `WRITE Reg 0x${req.index.toString(16)} = ${val} km/h → übernommen (Limit jetzt ${this.speedLimit})`)
+      } else {
+        this.note('·', `WRITE Reg 0x${req.index.toString(16)} — von der Firmware BLOCKIERT (wie ZT3)`)
+      }
+    } else {
+      this.note('·', `WRITE Reg 0x${req.index.toString(16)} (kein Speed-Register) — ignoriert`)
+    }
+    return null // WRITE_NR: keine Antwort
   }
 
   private onSetPwd(req: ParsedRequest, counter: number): Uint8Array | null {

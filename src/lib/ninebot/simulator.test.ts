@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ScooterSim } from './simulator'
+import { ScooterSim, makeF3ProD } from './simulator'
 import { crackHandshake, runHandshake } from './link'
 import type { HandshakeConfig } from './handshake'
 import { fromHex } from '../bytes'
@@ -58,5 +58,20 @@ describe('Handshake gegen den virtuellen ZT3', () => {
     const out = await crackHandshake(sim.asDiag(), enc(NAME), { ...silentHooks, timeoutMs: 40 }, PW, 40)
     expect(out.ok).toBe(true)
     expect(out.message).toContain('40 km/h')
+  })
+
+  it('F3-Pro-D-Bot (frisch): knacken → SET_PWD → AUTH → ENTDROSSELT das Limit 25 → 40', async () => {
+    const f3 = makeF3ProD()
+    expect(f3.getSpeedLimit()).toBe(25) // Werkslimit
+    const out = await crackHandshake(f3.asDiag(), enc(f3.cfg.btName), { ...silentHooks, timeoutMs: 40 }, undefined, 40)
+    expect(out.ok).toBe(true)
+    expect(f3.getSpeedLimit()).toBe(40) // Bordcomputer hat den Wert übernommen!
+  })
+
+  it('ZT3-artiger Bot: Kanal offen, aber Firmware BLOCKT die Writes → Limit bleibt 25', async () => {
+    const zt3 = new ScooterSim({ btName: NAME, paired: true, storedPassword: PW, acceptSpeedWrites: false })
+    const out = await crackHandshake(zt3.asDiag(), enc(NAME), { ...silentHooks, timeoutMs: 40 }, PW, 40)
+    expect(out.ok).toBe(true) // AUTH klappt
+    expect(zt3.getSpeedLimit()).toBe(25) // aber Limit unverändert — genau wie in echt
   })
 })
