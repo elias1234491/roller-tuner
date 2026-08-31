@@ -35,6 +35,10 @@ export function defaultTune(model: ScooterModel): TuneSettings {
     cruiseControl: false,
     cruiseTrigger: 'halten',
     zeroStart: false,
+    speedToggle: false,
+    speedToggleTrigger: 'blinker-links-2x',
+    throttledKmh: 22,
+    raceKmh: model.tuneMaxKmh,
   }
 }
 

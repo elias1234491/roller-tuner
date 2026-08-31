@@ -11,6 +11,12 @@ const KERS_OPTS: [Kers, string][] = [
   ['medium', 'Mittel'],
   ['strong', 'Stark'],
 ]
+const TRIGGER_OPTS: [CruiseTrigger, string][] = [
+  ['halten', 'Gas halten (5 s)'],
+  ['blinker-links-2x', '2× linker Blinker'],
+  ['blinker-rechts-2x', '2× rechter Blinker'],
+  ['klingel-halten', 'Klingel halten'],
+]
 
 export default function TuneView({
   device,
@@ -90,24 +96,56 @@ export default function TuneView({
               <div className="r-label">Tempomat aktivieren mit</div>
               <div className="r-desc">Tastenkombi am Roller</div>
             </div>
-            <select
-              value={tune.cruiseTrigger}
-              onChange={(e) => onChange({ cruiseTrigger: e.target.value as CruiseTrigger })}
-              style={{
-                background: 'var(--card2)',
-                color: 'var(--text)',
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                padding: '7px 10px',
-                fontSize: 13,
-              }}
-            >
-              <option value="halten">Gas halten (5 s)</option>
-              <option value="blinker-links-2x">2× linker Blinker</option>
-              <option value="blinker-rechts-2x">2× rechter Blinker</option>
-              <option value="klingel-halten">Klingel halten</option>
-            </select>
+            <TriggerSelect value={tune.cruiseTrigger} onChange={(v) => onChange({ cruiseTrigger: v })} />
           </div>
+        )}
+
+        <div className="row">
+          <div>
+            <div className="r-label">Drossel-Umschaltung 🏁</div>
+            <div className="r-desc">Per Kombi zwischen gedrosselt & Race+ wechseln</div>
+          </div>
+          <Switch on={tune.speedToggle} onToggle={() => onChange({ speedToggle: !tune.speedToggle })} />
+        </div>
+
+        {tune.speedToggle && (
+          <>
+            <div className="row">
+              <div>
+                <div className="r-label">Umschalten mit</div>
+                <div className="r-desc">Kombi am Roller (nutzt die Fahrstufen)</div>
+              </div>
+              <TriggerSelect value={tune.speedToggleTrigger} onChange={(v) => onChange({ speedToggleTrigger: v })} />
+            </div>
+            <div className="row">
+              <div>
+                <div className="r-label">Gedrosselt</div>
+                <div className="r-desc">legal, z. B. 22 km/h</div>
+              </div>
+              <NumInput
+                value={tune.throttledKmh}
+                min={10}
+                max={model.tuneMaxKmh}
+                onChange={(v) => onChange({ throttledKmh: v, raceKmh: Math.max(v, tune.raceKmh) })}
+              />
+            </div>
+            <div className="row">
+              <div>
+                <div className="r-label">Race Mode +</div>
+                <div className="r-desc">voll — nur Privatgelände</div>
+              </div>
+              <NumInput
+                value={tune.raceKmh}
+                min={tune.throttledKmh}
+                max={model.tuneMaxKmh}
+                onChange={(v) => onChange({ raceKmh: v })}
+              />
+            </div>
+            <p className="hint">
+              Der Roller schaltet mit seiner Modus-Taste/Kombi zwischen beiden Werten. Pro Fahrstufe wird
+              die Geschwindigkeit gesetzt (GearTopSpeed) — eine ganz neue Kombi kann die Firmware nicht lernen.
+            </p>
+          </>
         )}
 
         <div className="row">
@@ -154,5 +192,61 @@ function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
     <button className={'switch' + (on ? ' on' : '')} onClick={onToggle} aria-pressed={on}>
       <span className="knob" />
     </button>
+  )
+}
+
+function TriggerSelect({ value, onChange }: { value: CruiseTrigger; onChange: (v: CruiseTrigger) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as CruiseTrigger)}
+      style={{
+        background: 'var(--card2)',
+        color: 'var(--text)',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        padding: '7px 10px',
+        fontSize: 13,
+      }}
+    >
+      {TRIGGER_OPTS.map(([v, label]) => (
+        <option key={v} value={v}>
+          {label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+function NumInput({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number
+  min: number
+  max: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      onChange={(e) => onChange(clamp(Number(e.target.value) || 0, min, max))}
+      style={{
+        width: 72,
+        background: 'var(--card2)',
+        color: 'var(--text)',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        padding: '7px 10px',
+        fontSize: 14,
+        fontFamily: 'ui-monospace, monospace',
+        textAlign: 'right',
+      }}
+    />
   )
 }

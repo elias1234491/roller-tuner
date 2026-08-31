@@ -57,6 +57,14 @@ export interface TuneSettings {
   cruiseControl: boolean
   cruiseTrigger: CruiseTrigger
   zeroStart: boolean
+  /** Drossel-Umschaltung per Tastenkombi: schaltet zwischen gedrosselt und Race+ um. */
+  speedToggle: boolean
+  /** Welche Kombi umschaltet (nutzt dieselben Trigger wie der Tempomat). */
+  speedToggleTrigger: CruiseTrigger
+  /** Gedrosselter Wert (legal, z. B. 22 km/h). */
+  throttledKmh: number
+  /** Race-Mode-Wert (voll, nur Privatgelände). */
+  raceKmh: number
 }
 
 /** Ein verbundener (echter oder Demo-)Roller im laufenden Zustand. */
