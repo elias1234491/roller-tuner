@@ -39,6 +39,7 @@ export function defaultTune(model: ScooterModel): TuneSettings {
     speedToggleTrigger: 'blinker-links-2x',
     throttledKmh: 22,
     raceKmh: model.tuneMaxKmh,
+    raceDisguise: false,
   }
 }
 

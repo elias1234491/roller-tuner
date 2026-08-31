@@ -132,18 +132,34 @@ export default function TuneView({
             <div className="row">
               <div>
                 <div className="r-label">Race Mode +</div>
-                <div className="r-desc">voll — nur Privatgelände</div>
+                <div className="r-desc">
+                  {tune.raceDisguise ? `getarnt → fährt nur ${tune.throttledKmh} km/h` : 'voll — nur Privatgelände'}
+                </div>
               </div>
-              <NumInput
-                value={tune.raceKmh}
-                min={tune.throttledKmh}
-                max={model.tuneMaxKmh}
-                onChange={(v) => onChange({ raceKmh: v })}
-              />
+              {tune.raceDisguise ? (
+                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 14, opacity: 0.65 }}>
+                  🕵️ {tune.throttledKmh} km/h
+                </span>
+              ) : (
+                <NumInput
+                  value={tune.raceKmh}
+                  min={tune.throttledKmh}
+                  max={model.tuneMaxKmh}
+                  onChange={(v) => onChange({ raceKmh: v })}
+                />
+              )}
+            </div>
+            <div className="row">
+              <div>
+                <div className="r-label">🕵️ Race-Modus tarnen</div>
+                <div className="r-desc">Zeigt Race aktiv, hält aber {tune.throttledKmh} km/h</div>
+              </div>
+              <Switch on={tune.raceDisguise} onToggle={() => onChange({ raceDisguise: !tune.raceDisguise })} />
             </div>
             <p className="hint">
-              Der Roller schaltet mit seiner Modus-Taste/Kombi zwischen beiden Werten. Pro Fahrstufe wird
-              die Geschwindigkeit gesetzt (GearTopSpeed) — eine ganz neue Kombi kann die Firmware nicht lernen.
+              Der Roller schaltet mit seiner Modus-Taste/Kombi zwischen den Werten. Pro Fahrstufe wird die
+              Geschwindigkeit gesetzt (GearTopSpeed). Mit „tarnen" sieht der Race-Modus aktiv aus, bleibt aber
+              bei {tune.throttledKmh} km/h — praktisch für Vorführung oder legal fahren.
             </p>
           </>
         )}

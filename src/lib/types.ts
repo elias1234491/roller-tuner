@@ -65,6 +65,8 @@ export interface TuneSettings {
   throttledKmh: number
   /** Race-Mode-Wert (voll, nur Privatgelände). */
   raceKmh: number
+  /** Tarn-Modus: Race sieht aktiv aus, fährt aber nur den gedrosselten Wert. */
+  raceDisguise: boolean
 }
 
 /** Ein verbundener (echter oder Demo-)Roller im laufenden Zustand. */
